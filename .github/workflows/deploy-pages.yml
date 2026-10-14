@@ -1,0 +1,62 @@
+name: Publicar frontend (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/web/**
+      - packages/shared/**
+      - package-lock.json
+      - .github/workflows/deploy-pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Repository variables (Settings › Secrets and variables › Actions › Variables).
+      # These values are PUBLIC: they are embedded in the bundle. Never put secrets here.
+      VITE_API_URL: ${{ vars.MYNOTES_API_URL }}
+      # "/<repo>/" for https://<user>.github.io/<repo>/ ; set MYNOTES_BASE_PATH="/" for a custom domain or <user>.github.io repo
+      BASE_PATH: ${{ vars.MYNOTES_BASE_PATH || format('/{0}/', github.event.repository.name) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verificar configuração
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "::error::Defina a variável de repositório MYNOTES_API_URL (URL do Worker, ex.: https://mynotes-api.<conta>.workers.dev)"
+            exit 1
+          fi
+          case "$VITE_API_URL" in https://*) ;; *) echo "::error::MYNOTES_API_URL deve usar https"; exit 1;; esac
+          echo "API: $VITE_API_URL  ·  base: $BASE_PATH"
+      - run: npm ci
+      - run: npm run typecheck -w @mynotes/web
+      - run: npm run test -w @mynotes/web
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

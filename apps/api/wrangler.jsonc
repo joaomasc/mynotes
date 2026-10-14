@@ -1,0 +1,39 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mynotes-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": {
+    "enabled": true,
+    // Request bodies and headers are never logged by the app; keep sampling low.
+    "head_sampling_rate": 1
+  },
+  // Daily housekeeping: expired tokens, stale imports, abandoned uploads.
+  "triggers": {
+    "crons": ["17 4 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mynotes",
+      // Replace with the id printed by `wrangler d1 create mynotes` (see README).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "mynotes-files"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    // Comma-separated exact origins allowed by CORS, e.g. "https://user.github.io".
+    // Local development overrides this in .dev.vars.
+    "ALLOWED_ORIGINS": "https://YOUR_GITHUB_USER.github.io",
+    "SESSION_MAX_DAYS": "60",
+    "SESSION_IDLE_DAYS": "14"
+  }
+  // Secrets (never commit): AUTH_SECRET — set with `wrangler secret put AUTH_SECRET`.
+}

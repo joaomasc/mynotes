@@ -1,0 +1,31 @@
+{
+  "name": "@mynotes/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "typegen": "wrangler types --include-runtime=true",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:migrations:list": "wrangler d1 migrations list DB --remote",
+    "create-user": "node scripts/create-user.mjs"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "^1.6.3",
+    "@mynotes/shared": "*",
+    "@scalar/hono-api-reference": "^0.12.12",
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.1",
+    "hash-wasm": "^4.12.0",
+    "vitest": "~4.1.11",
+    "wrangler": "^4.150.0"
+  }
+}

@@ -1,0 +1,249 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * MyNotes design tokens. Warm neutrals with a single moderate accent (deep
+ * teal). All colors are semantic variables so light/dark are one switch.
+ */
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --surface-2: #f1efea;
+  --surface-3: #e8e5de;
+  --border: #e3e0d8;
+  --border-strong: #cfcac0;
+  --text: #1f1e1b;
+  --text-muted: #6b675f;
+  --text-subtle: #8f8a80;
+  --accent: #0f6e6a;
+  --accent-hover: #0c5b58;
+  --accent-soft: #e2f0ee;
+  --accent-fg: #ffffff;
+  --danger: #b4372f;
+  --danger-soft: #f8e6e4;
+  --warning: #9a6200;
+  --warning-soft: #fbf0db;
+  --success: #2f7a3e;
+  --success-soft: #e5f2e7;
+  --focus: #0f6e6a;
+  --shadow: 0 1px 2px rgb(31 30 27 / 0.06), 0 4px 16px rgb(31 30 27 / 0.06);
+  --shadow-lg: 0 8px 32px rgb(31 30 27 / 0.14);
+
+  /* Entity colors (graph, badges) — distinguishable in both themes */
+  --c-topic: #0f6e6a;
+  --c-note: #3a5ba9;
+  --c-document: #a3532a;
+  --c-reading: #7a4fa0;
+  --c-concept: #8a7a12;
+}
+
+.dark {
+  --bg: #141413;
+  --surface: #1c1c1a;
+  --surface-2: #232320;
+  --surface-3: #2c2c28;
+  --border: #2f2f2b;
+  --border-strong: #42423c;
+  --text: #ecebe6;
+  --text-muted: #a6a39a;
+  --text-subtle: #7c7a72;
+  --accent: #4fb3ab;
+  --accent-hover: #6cc4bd;
+  --accent-soft: #19302e;
+  --accent-fg: #0b1716;
+  --danger: #e57469;
+  --danger-soft: #3a1f1c;
+  --warning: #e0a94a;
+  --warning-soft: #33280f;
+  --success: #6dbb7c;
+  --success-soft: #1c3020;
+  --focus: #6cc4bd;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
+  --shadow-lg: 0 8px 32px rgb(0 0 0 / 0.5);
+
+  --c-topic: #4fb3ab;
+  --c-note: #7f9de0;
+  --c-document: #e0916a;
+  --c-reading: #b994dc;
+  --c-concept: #d4c25a;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: ui-serif, Georgia, 'Times New Roman', serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-topic: var(--c-topic);
+  --color-note: var(--c-note);
+  --color-document: var(--c-document);
+  --color-reading: var(--c-reading);
+  --color-concept: var(--c-concept);
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-lg);
+  --animate-fade-in: fade-in 140ms ease-out;
+  --animate-pop-in: pop-in 160ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* ------------------------------------------------------------- editor -- */
+.prose-note {
+  @apply text-[1.0625rem] leading-[1.75] text-text;
+  overflow-wrap: anywhere;
+}
+.prose-note:focus {
+  outline: none;
+}
+.prose-note > * + * {
+  margin-top: 0.75em;
+}
+.prose-note h1 {
+  @apply mt-8 text-[1.75rem] leading-tight font-semibold tracking-tight;
+}
+.prose-note h2 {
+  @apply mt-7 text-[1.375rem] leading-snug font-semibold tracking-tight;
+}
+.prose-note h3 {
+  @apply mt-6 text-[1.125rem] font-semibold;
+}
+.prose-note ul {
+  @apply list-disc pl-6;
+}
+.prose-note ol {
+  @apply list-decimal pl-6;
+}
+.prose-note li > p {
+  margin: 0.15em 0;
+}
+.prose-note ul[data-type='taskList'] {
+  @apply list-none pl-1;
+}
+.prose-note ul[data-type='taskList'] li {
+  @apply flex items-start gap-2;
+}
+.prose-note ul[data-type='taskList'] li > label {
+  @apply mt-[0.3em] select-none;
+}
+.prose-note ul[data-type='taskList'] li > div {
+  @apply flex-1;
+}
+.prose-note ul[data-type='taskList'] li[data-checked='true'] > div {
+  @apply text-muted line-through;
+}
+.prose-note blockquote {
+  @apply border-l-[3px] border-border-strong pl-4 text-muted italic;
+}
+.prose-note code {
+  @apply rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[0.875em];
+}
+.prose-note pre {
+  @apply overflow-x-auto rounded-lg bg-surface-2 p-4 font-mono text-sm leading-relaxed;
+}
+.prose-note pre code {
+  @apply bg-transparent p-0;
+}
+.prose-note hr {
+  @apply my-8 border-border;
+}
+.prose-note a {
+  @apply text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent;
+}
+.prose-note a[href^='mynotes:'] {
+  @apply rounded bg-accent-soft px-1 no-underline;
+}
+.prose-note p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  @apply pointer-events-none float-left h-0 text-subtle;
+}
+
+/* ---------------------------------------------------------- react flow -- */
+.react-flow {
+  --xy-background-color: var(--bg);
+  --xy-node-background-color: var(--surface);
+  --xy-node-border: 1px solid var(--border);
+  --xy-node-color: var(--text);
+  --xy-edge-stroke: var(--border-strong);
+  --xy-minimap-background-color: var(--surface);
+  --xy-controls-button-background-color: var(--surface);
+  --xy-controls-button-background-color-hover: var(--surface-2);
+  --xy-controls-button-color: var(--text);
+  --xy-controls-button-border-color: var(--border);
+  --xy-attribution-background-color: transparent;
+}

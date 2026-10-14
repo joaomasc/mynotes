@@ -1,0 +1,206 @@
+import type {
+  ActivityEvent,
+  Backlink,
+  BackupManifest,
+  BackupTableName,
+  Concept,
+  ConceptCreate,
+  ConceptUpdate,
+  Dashboard,
+  DocumentCreate,
+  DocumentMeta,
+  DocumentUpdate,
+  Favorite,
+  FavoriteEntityType,
+  Graph,
+  ImportMode,
+  ImportResult,
+  MindMap,
+  MindMapCreate,
+  MindMapSummary,
+  MindMapUpdate,
+  Note,
+  NoteCreate,
+  NoteRevision,
+  NoteRevisionSummary,
+  NoteSummary,
+  NoteUpdate,
+  Plan,
+  PlanCreate,
+  PlanDetail,
+  PlanItem,
+  PlanItemCreate,
+  PlanItemUpdate,
+  PlanUpdate,
+  Reading,
+  ReadingCreate,
+  ReadingUpdate,
+  RelationCreate,
+  RelationUpdate,
+  RelationWithTitles,
+  SearchResult,
+  Session,
+  Setting,
+  SettingKey,
+  StudySession,
+  StudySessionCreate,
+  StudySessionUpdate,
+  StudyStats,
+  Topic,
+  TopicCreate,
+  TopicDetail,
+  TopicMove,
+  TopicUpdate,
+  TopicWithCounts,
+  TrashItem,
+  UpcomingGoal,
+  User,
+} from '@mynotes/shared';
+import { api } from './client';
+
+/** Every API call used by the app, typed with the shared contract. */
+export const endpoints = {
+  auth: {
+    me: () => api.get<User>('/auth/me'),
+    sessions: () => api.get<Session[]>('/auth/sessions'),
+    revokeSession: (id: string) => api.del(`/auth/sessions/${id}`),
+    revokeOthers: () => api.post<{ revoked: number }>('/auth/sessions/revoke-others'),
+  },
+
+  topics: {
+    list: () => api.get<TopicWithCounts[]>('/topics'),
+    get: (id: string) => api.get<TopicDetail>(`/topics/${id}`),
+    create: (body: TopicCreate) => api.post<Topic>('/topics', body),
+    update: (id: string, body: TopicUpdate) => api.patch<Topic>(`/topics/${id}`, body),
+    move: (id: string, body: TopicMove) => api.post<Topic>(`/topics/${id}/move`, body),
+    remove: (id: string, mode: 'trash_all' | 'move_to_parent') =>
+      api.del<{ batchId: string; affected: number }>(`/topics/${id}`, { mode }),
+  },
+
+  notes: {
+    list: (q: { topicId?: string; sort?: string; cursor?: string; limit?: number }) =>
+      api.page<NoteSummary>('/notes', q),
+    get: (id: string, signal?: AbortSignal) => api.get<Note>(`/notes/${id}`, undefined, signal),
+    create: (body: NoteCreate) => api.post<Note>('/notes', body),
+    update: (id: string, body: NoteUpdate) => api.patch<NoteSummary>(`/notes/${id}`, body, { retries: 0 }),
+    move: (id: string, body: { baseVersion: number; topicId: string | null; afterId?: string | null; beforeId?: string | null }) =>
+      api.post<NoteSummary>(`/notes/${id}/move`, body),
+    remove: (id: string) => api.del(`/notes/${id}`),
+    revisions: (id: string) => api.get<NoteRevisionSummary[]>(`/notes/${id}/revisions`),
+    revision: (id: string, revisionId: string) => api.get<NoteRevision>(`/notes/${id}/revisions/${revisionId}`),
+    backlinks: (type: string, id: string) => api.get<Backlink[]>(`/backlinks/${type}/${id}`),
+  },
+
+  documents: {
+    list: (q: { topicId?: string; type?: string; q?: string; cursor?: string; limit?: number }) =>
+      api.page<DocumentMeta>('/documents', q),
+    get: (id: string) => api.get<DocumentMeta>(`/documents/${id}`),
+    create: (body: DocumentCreate) => api.post<DocumentMeta>('/documents', body),
+    update: (id: string, body: DocumentUpdate) => api.patch<DocumentMeta>(`/documents/${id}`, body),
+    remove: (id: string) => api.del(`/documents/${id}`),
+    link: (id: string, download: boolean) =>
+      api.post<{ url: string; expiresAt: string }>(`/documents/${id}/link`, { download }),
+    contentPath: (id: string) => `/documents/${id}/content`,
+  },
+
+  readings: {
+    list: (q: { status?: string; topicId?: string; overdue?: string; q?: string; sort?: string; cursor?: string; limit?: number }) =>
+      api.page<Reading>('/readings', q),
+    get: (id: string) => api.get<Reading>(`/readings/${id}`),
+    create: (body: ReadingCreate) => api.post<Reading>('/readings', body),
+    update: (id: string, body: ReadingUpdate) => api.patch<Reading>(`/readings/${id}`, body),
+    remove: (id: string) => api.del(`/readings/${id}`),
+  },
+
+  plans: {
+    list: (status?: string) => api.get<Plan[]>('/plans', { status }),
+    upcoming: () => api.get<UpcomingGoal[]>('/plans/upcoming'),
+    get: (id: string) => api.get<PlanDetail>(`/plans/${id}`),
+    create: (body: PlanCreate) => api.post<Plan>('/plans', body),
+    update: (id: string, body: PlanUpdate) => api.patch<Plan>(`/plans/${id}`, body),
+    remove: (id: string) => api.del(`/plans/${id}`),
+    addItem: (planId: string, body: PlanItemCreate) => api.post<PlanItem>(`/plans/${planId}/items`, body),
+    updateItem: (planId: string, itemId: string, body: PlanItemUpdate) =>
+      api.patch<PlanItem>(`/plans/${planId}/items/${itemId}`, body),
+    removeItem: (planId: string, itemId: string) => api.del(`/plans/${planId}/items/${itemId}`),
+  },
+
+  study: {
+    list: (q: { from?: string; to?: string; topicId?: string; cursor?: string; limit?: number }) =>
+      api.page<StudySession>('/study-sessions', q),
+    stats: (q: { from: string; to: string; tzOffset: number }) => api.get<StudyStats>('/study-sessions/stats', q),
+    create: (body: StudySessionCreate) => api.post<StudySession>('/study-sessions', body),
+    update: (id: string, body: StudySessionUpdate) => api.patch<StudySession>(`/study-sessions/${id}`, body),
+    remove: (id: string) => api.del(`/study-sessions/${id}`),
+  },
+
+  concepts: {
+    list: (topicId?: string) => api.get<Concept[]>('/concepts', { topicId }),
+    get: (id: string) => api.get<Concept>(`/concepts/${id}`),
+    create: (body: ConceptCreate) => api.post<Concept>('/concepts', body),
+    update: (id: string, body: ConceptUpdate) => api.patch<Concept>(`/concepts/${id}`, body),
+    remove: (id: string) => api.del(`/concepts/${id}`),
+  },
+
+  relations: {
+    list: (entityType: string, entityId: string) =>
+      api.get<RelationWithTitles[]>('/relations', { entityType, entityId }),
+    create: (body: RelationCreate) => api.post<RelationWithTitles>('/relations', body),
+    update: (id: string, body: RelationUpdate) => api.patch(`/relations/${id}`, body),
+    remove: (id: string) => api.del(`/relations/${id}`),
+  },
+
+  mindMaps: {
+    list: () => api.get<MindMapSummary[]>('/mind-maps'),
+    get: (id: string) => api.get<MindMap>(`/mind-maps/${id}`),
+    create: (body: MindMapCreate) => api.post<MindMap>('/mind-maps', body),
+    update: (id: string, body: MindMapUpdate) => api.patch<MindMapSummary>(`/mind-maps/${id}`, body, { retries: 0 }),
+    remove: (id: string) => api.del(`/mind-maps/${id}`),
+  },
+
+  graph: (q: { types?: string; topicId?: string; structure?: string }) => api.get<Graph>('/graph', q),
+  dashboard: () => api.get<Dashboard>('/dashboard'),
+  search: (q: string, types?: string, limit = 20, signal?: AbortSignal) =>
+    api.get<SearchResult[]>('/search', { q, types, limit }, signal),
+
+  favorites: {
+    list: () => api.get<Favorite[]>('/favorites'),
+    add: (entityType: FavoriteEntityType, entityId: string) => api.post<Favorite>('/favorites', { entityType, entityId }),
+    remove: (entityType: FavoriteEntityType, entityId: string) => api.del(`/favorites/${entityType}/${entityId}`),
+  },
+
+  activity: {
+    list: (cursor?: string) => api.page<ActivityEvent>('/activity', { cursor, limit: 50 }),
+    view: (entityType: string, entityId: string) =>
+      api.post('/activity/view', { entityType, entityId }, { track: false, retries: 0 }),
+  },
+
+  settings: {
+    list: () => api.get<Setting[]>('/settings'),
+    put: (key: SettingKey, value: unknown, baseVersion?: number) =>
+      api.put<Setting>(`/settings/${key}`, { value, ...(baseVersion ? { baseVersion } : {}) }),
+  },
+
+  trash: {
+    list: () => api.get<TrashItem[]>('/trash'),
+    restore: (type: string, id: string) => api.post<{ count: number }>('/trash/restore', { type, id }),
+    purge: (type: string, id: string) => api.del<{ count: number }>(`/trash/${type}/${id}`),
+    empty: () => api.post<{ count: number }>('/trash/empty'),
+  },
+
+  backup: {
+    manifest: () => api.get<BackupManifest>('/backup/manifest'),
+    exportPage: (table: BackupTableName, cursor?: string) =>
+      api.get<{ table: string; rows: Record<string, unknown>[]; nextCursor: string | null }>(
+        `/backup/export/${table}`,
+        { cursor },
+      ),
+    createImport: (mode: ImportMode, manifest: BackupManifest) =>
+      api.post<{ jobId: string }>('/backup/imports', { mode, manifest }),
+    chunk: (jobId: string, seq: number, table: BackupTableName, rows: Record<string, unknown>[]) =>
+      api.post<{ accepted: number }>(`/backup/imports/${jobId}/chunks`, { seq, table, rows }),
+    commit: (jobId: string, chunkCount: number, confirm?: string) =>
+      api.post<ImportResult>(`/backup/imports/${jobId}/commit`, { chunkCount, ...(confirm ? { confirm } : {}) }),
+    cancel: (jobId: string) => api.del(`/backup/imports/${jobId}`),
+  },
+};

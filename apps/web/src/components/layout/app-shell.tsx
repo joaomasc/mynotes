@@ -1,0 +1,368 @@
+import { useEffect, useState, type ReactNode } from 'react';
+import { Dialog as RDialog } from 'radix-ui';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import {
+  BookOpen,
+  CalendarDays,
+  House,
+  LibraryBig,
+  ListTodo,
+  LogOut,
+  Menu as MenuIcon,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  Settings,
+  StickyNote,
+  Upload,
+  Waypoints,
+  X,
+} from 'lucide-react';
+import { IconButton } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
+import { Kbd } from '@/components/ui/feedback';
+import { Menu } from '@/components/ui/menu';
+import { logout, useAuth } from '@/lib/auth/session';
+import { cn } from '@/lib/cn';
+import { isTypingTarget, useLocalPreference } from '@/lib/hooks';
+import { notesSync } from '@/lib/sync/notes-sync';
+import { useConfirm } from '@/components/ui/dialog';
+import { TopicTree } from '@/features/topics/topic-tree';
+import { useCreateNote } from '@/features/notes/use-create-note';
+import { CommandPaletteProvider, useCommandPalette } from './command-palette';
+import { SyncIndicator } from './sync-indicator';
+
+const NAV = [
+  { to: '/', label: 'Início', icon: House, end: true },
+  { to: '/notes', label: 'Notas', icon: StickyNote },
+  { to: '/library', label: 'Biblioteca', icon: LibraryBig },
+  { to: '/readings', label: 'Leituras', icon: BookOpen },
+  { to: '/plans', label: 'Planos', icon: ListTodo },
+  { to: '/study', label: 'Estudos', icon: CalendarDays },
+  { to: '/maps', label: 'Mapas mentais', icon: Network },
+  { to: '/graph', label: 'Grafo', icon: Waypoints },
+];
+
+function useQuickCreate() {
+  const navigate = useNavigate();
+  const createNote = useCreateNote();
+  return [
+    { label: 'Nova nota', icon: <StickyNote />, onSelect: () => createNote.mutate(null), shortcut: 'Alt+N' },
+    { label: 'Registrar sessão de estudo', icon: <CalendarDays />, onSelect: () => void navigate('/study?log=1') },
+    { label: 'Nova leitura', icon: <BookOpen />, onSelect: () => void navigate('/readings?new=1') },
+    { label: 'Enviar documento', icon: <Upload />, onSelect: () => void navigate('/library?upload=1') },
+    { label: 'Novo mapa mental', icon: <Network />, onSelect: () => void navigate('/maps?new=1') },
+  ];
+}
+
+function NavItems({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+  return (
+    <nav aria-label="Principal" className="space-y-px">
+      {NAV.map(({ to, label, icon: Icon, end }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={end}
+          onClick={onNavigate}
+          title={collapsed ? label : undefined}
+          className={({ isActive }) =>
+            cn(
+              'flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm transition-colors lg:h-8',
+              isActive ? 'bg-surface-3 font-medium text-text' : 'text-muted hover:bg-surface-2 hover:text-text',
+              collapsed && 'justify-center px-0',
+            )
+          }
+        >
+          <Icon className="size-4 shrink-0" aria-hidden />
+          <span className={cn(collapsed && 'sr-only')}>{label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+function UserFooter({ collapsed }: { collapsed?: boolean }) {
+  const { user } = useAuth();
+  const confirm = useConfirm();
+  const navigate = useNavigate();
+  const doLogout = async () => {
+    const pending = await notesSync.pendingCount();
+    if (
+      pending > 0 &&
+      !(await confirm({
+        title: 'Há alterações não sincronizadas',
+        description: `${pending} nota(s) ainda não foram enviadas ao servidor e serão perdidas se você sair agora.`,
+        confirmLabel: 'Sair mesmo assim',
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    await logout();
+    void navigate('/login');
+  };
+  return (
+    <div className={cn('flex items-center gap-1 border-t border-border pt-2', collapsed && 'flex-col')}>
+      {!collapsed && (
+        <div className="min-w-0 flex-1 px-2">
+          <div className="truncate text-[13px] font-medium">{user?.displayName ?? user?.username}</div>
+          <SyncIndicator />
+        </div>
+      )}
+      {collapsed && <SyncIndicator compact />}
+      <NavLink to="/settings" aria-label="Configurações" title="Configurações" className="rounded-lg p-2 text-muted hover:bg-surface-2 hover:text-text">
+        <Settings className="size-4" />
+      </NavLink>
+      <IconButton label="Sair" size="sm" onClick={() => void doLogout()}>
+        <LogOut className="size-4" />
+      </IconButton>
+    </div>
+  );
+}
+
+function Brand({ collapsed }: { collapsed?: boolean }) {
+  return (
+    <div className={cn('flex items-center gap-2 px-2', collapsed && 'justify-center px-0')}>
+      <img src={`${import.meta.env.BASE_URL}icons/icon.svg`} alt="" className="size-6 rounded-md" />
+      {!collapsed && <span className="text-[15px] font-semibold tracking-tight">MyNotes</span>}
+    </div>
+  );
+}
+
+function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const palette = useCommandPalette();
+  const quick = useQuickCreate();
+  return (
+    <aside
+      className={cn(
+        'sticky top-0 hidden h-dvh shrink-0 flex-col gap-3 border-r border-border bg-surface-2/40 py-3 lg:flex',
+        collapsed ? 'w-14 px-2' : 'w-64 px-3',
+      )}
+      aria-label="Barra lateral"
+    >
+      <div className={cn('flex items-center justify-between', collapsed && 'flex-col gap-2')}>
+        <Brand collapsed={collapsed} />
+        <IconButton label={collapsed ? 'Expandir barra lateral (Ctrl+\\)' : 'Recolher barra lateral (Ctrl+\\)'} size="sm" onClick={onToggle}>
+          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        </IconButton>
+      </div>
+      <div className={cn('flex gap-1.5', collapsed && 'flex-col')}>
+        <button
+          type="button"
+          onClick={palette.open}
+          title="Buscar (Ctrl+K)"
+          className={cn(
+            'flex h-8 items-center gap-2 rounded-lg border border-border bg-surface text-sm text-subtle hover:border-border-strong',
+            collapsed ? 'w-10 justify-center' : 'flex-1 px-2.5',
+          )}
+        >
+          <Search className="size-4" aria-hidden />
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left">Buscar</span>
+              <Kbd>Ctrl K</Kbd>
+            </>
+          )}
+          {collapsed && <span className="sr-only">Buscar</span>}
+        </button>
+        <Menu
+          label="Criar"
+          align="start"
+          trigger={
+            <IconButton label="Criar" size="sm" variant="secondary" className={cn(collapsed ? 'size-10' : 'size-8')}>
+              <Plus className="size-4" />
+            </IconButton>
+          }
+          items={quick}
+        />
+      </div>
+      <NavItems collapsed={collapsed} />
+      <div className={cn('scrollbar-thin -mx-1 min-h-0 flex-1 overflow-y-auto px-1', collapsed && 'hidden')}>
+        <TopicTree />
+      </div>
+      {collapsed && <div className="flex-1" />}
+      <UserFooter collapsed={collapsed} />
+    </aside>
+  );
+}
+
+function MobileDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const close = () => onOpenChange(false);
+  return (
+    <RDialog.Root open={open} onOpenChange={onOpenChange}>
+      <RDialog.Portal>
+        <RDialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-black/40 lg:hidden" />
+        <RDialog.Content
+          aria-describedby={undefined}
+          className="safe-top fixed inset-y-0 left-0 z-50 flex w-[86vw] max-w-80 flex-col gap-3 bg-surface px-3 py-3 shadow-pop lg:hidden"
+        >
+          <RDialog.Title className="sr-only">Menu</RDialog.Title>
+          <div className="flex items-center justify-between">
+            <Brand />
+            <RDialog.Close className="rounded-lg p-2 text-muted hover:bg-surface-2" aria-label="Fechar menu">
+              <X className="size-5" />
+            </RDialog.Close>
+          </div>
+          <NavItems onNavigate={close} />
+          <div className="scrollbar-thin -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+            <TopicTree onNavigate={close} />
+          </div>
+          <div className="safe-bottom">
+            <UserFooter />
+          </div>
+        </RDialog.Content>
+      </RDialog.Portal>
+    </RDialog.Root>
+  );
+}
+
+function MobileTopBar({ onMenu }: { onMenu: () => void }) {
+  const palette = useCommandPalette();
+  return (
+    <header className="safe-top sticky top-0 z-30 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center gap-1 border-b border-border bg-bg/90 px-2 backdrop-blur lg:hidden">
+      <IconButton label="Abrir menu" onClick={onMenu}>
+        <MenuIcon className="size-5" />
+      </IconButton>
+      <div className="flex-1">
+        <Brand />
+      </div>
+      <SyncIndicator compact />
+      <IconButton label="Buscar" onClick={palette.open}>
+        <Search className="size-5" />
+      </IconButton>
+    </header>
+  );
+}
+
+function MobileBottomNav({ onMenu }: { onMenu: () => void }) {
+  const quick = useQuickCreate();
+  const item = (to: string, label: string, Icon: typeof House, end = false) => (
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) =>
+        cn('flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px]', isActive ? 'text-accent' : 'text-muted')
+      }
+    >
+      <Icon className="size-5" aria-hidden />
+      {label}
+    </NavLink>
+  );
+  return (
+    <nav
+      aria-label="Navegação rápida"
+      className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 backdrop-blur lg:hidden"
+    >
+      <div className="flex h-16 items-stretch">
+        {item('/', 'Início', House, true)}
+        {item('/notes', 'Notas', StickyNote)}
+        <div className="flex flex-1 items-center justify-center">
+          <Menu
+            label="Criar"
+            align="center"
+            trigger={
+              <button type="button" aria-label="Criar" className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-fg shadow-card">
+                <Plus className="size-6" />
+              </button>
+            }
+            items={quick}
+          />
+        </div>
+        {item('/study', 'Estudos', CalendarDays)}
+        <button type="button" onClick={onMenu} className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] text-muted">
+          <MenuIcon className="size-5" aria-hidden />
+          Mais
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const rows: [string, ReactNode][] = [
+    ['Buscar / comandos', <Kbd key="k">Ctrl K</Kbd>],
+    ['Nova nota', <Kbd key="n">Alt N</Kbd>],
+    ['Recolher barra lateral', <Kbd key="b">Ctrl \</Kbd>],
+    ['Salvar nota agora', <Kbd key="s">Ctrl S</Kbd>],
+    ['Inserir link (no editor)', <Kbd key="l">Ctrl K</Kbd>],
+    ['Ir para Início / Notas / Estudos', <span key="g"><Kbd>G</Kbd> + <Kbd>H</Kbd> / <Kbd>N</Kbd> / <Kbd>E</Kbd></span>],
+    ['Mostrar atalhos', <Kbd key="q">?</Kbd>],
+  ];
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange} title="Atalhos de teclado" size="sm">
+      <dl className="divide-y divide-border text-sm">
+        {rows.map(([label, keys]) => (
+          <div key={label} className="flex items-center justify-between py-2.5">
+            <dt className="text-muted">{label}</dt>
+            <dd>{keys}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-3 text-xs text-subtle">No macOS, use ⌘ no lugar de Ctrl.</p>
+    </Dialog>
+  );
+}
+
+function GlobalShortcuts({ onToggleSidebar, onHelp }: { onToggleSidebar: () => void; onHelp: () => void }) {
+  const navigate = useNavigate();
+  const createNote = useCreateNote();
+  useEffect(() => {
+    let lastG = 0;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
+        e.preventDefault();
+        onToggleSidebar();
+        return;
+      }
+      if (e.altKey && !e.ctrlKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        createNote.mutate(null);
+        return;
+      }
+      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === '?') {
+        onHelp();
+      } else if (e.key.toLowerCase() === 'g') {
+        lastG = Date.now();
+      } else if (Date.now() - lastG < 1000) {
+        const to = { h: '/', n: '/notes', e: '/study', b: '/library', l: '/readings' }[e.key.toLowerCase()];
+        if (to) void navigate(to);
+        lastG = 0;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigate, createNote, onToggleSidebar, onHelp]);
+  return null;
+}
+
+export function AppShell() {
+  const [collapsed, setCollapsed] = useLocalPreference('mynotes:sidebar-collapsed', false);
+  const [drawer, setDrawer] = useState(false);
+  const [help, setHelp] = useState(false);
+  const location = useLocation();
+  useEffect(() => setDrawer(false), [location.pathname]);
+
+  return (
+    <CommandPaletteProvider>
+      <a href="#main" className="sr-only z-50 rounded bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
+        Pular para o conteúdo
+      </a>
+      <div className="flex min-h-dvh">
+        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <MobileTopBar onMenu={() => setDrawer(true)} />
+          <main id="main" className="min-w-0 flex-1 pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0">
+            <Outlet />
+          </main>
+        </div>
+      </div>
+      <MobileDrawer open={drawer} onOpenChange={setDrawer} />
+      <MobileBottomNav onMenu={() => setDrawer(true)} />
+      <ShortcutsDialog open={help} onOpenChange={setHelp} />
+      <GlobalShortcuts onToggleSidebar={() => setCollapsed(!collapsed)} onHelp={() => setHelp(true)} />
+    </CommandPaletteProvider>
+  );
+}
