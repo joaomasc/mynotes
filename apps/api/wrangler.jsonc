@@ -31,7 +31,7 @@
     "ENVIRONMENT": "production",
     // Comma-separated exact origins allowed by CORS, e.g. "https://user.github.io".
     // Local development overrides this in .dev.vars.
-    "ALLOWED_ORIGINS": "https://joaomasc.github.io",
+    "ALLOWED_ORIGINS": "https://mynotes-web.joaomasc-dev.workers.dev,https://joaomasc.github.io",
     "SESSION_MAX_DAYS": "60",
     "SESSION_IDLE_DAYS": "14"
   }
