@@ -31,8 +31,8 @@ export async function waitForNoteSave(page: Page, id: string, text: string): Pro
   );
 }
 
-/** Minimal valid multi-page PDF with real text. */
-export function samplePdf(pages: string[][]): Buffer {
+/** Minimal valid multi-page PDF with real text; `paddingBytes` makes it large but still well-formed. */
+export function samplePdf(pages: string[][], paddingBytes = 0): Buffer {
   const objs: string[] = [];
   const add = (s: string) => objs.push(s);
   add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
@@ -44,6 +44,8 @@ export function samplePdf(pages: string[][]): Buffer {
     pageIds.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents ${objs.length} 0 R >>`));
   }
   objs[1] = `<< /Type /Pages /Kids [${pageIds.map((i) => `${i} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
+  // Unreferenced data stream (like the images of a scanned book): a large but well-formed file.
+  if (paddingBytes > 0) add(`<< /Length ${paddingBytes} >>\nstream\n${' '.repeat(paddingBytes)}\nendstream`);
   const catalog = add('<< /Type /Catalog /Pages 2 0 R >>');
   let out = '%PDF-1.4\n';
   const offsets: number[] = [];

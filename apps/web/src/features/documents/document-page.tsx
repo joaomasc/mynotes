@@ -22,7 +22,7 @@ import { TopicBreadcrumb } from '../shared/topic-breadcrumb';
 import { useRecordView } from '../shared/use-view';
 import { TopicSelect } from '../topics/topic-dialogs';
 import { docTypeLabel } from './doc-icon';
-import { DownloadProgress, PdfViewer } from './pdf-viewer';
+import { DocumentPdf, DownloadProgress } from './pdf-viewer';
 
 function Preview({ doc }: { doc: DocumentMeta }) {
   const preview = ALLOWED_FILE_TYPES[doc.mimeType as AllowedMimeType]?.preview ?? null;
@@ -30,7 +30,8 @@ function Preview({ doc }: { doc: DocumentMeta }) {
   const file = useQuery({
     queryKey: ['document-file', doc.id, doc.version],
     queryFn: ({ signal }) => fetchWithProgress(endpoints.documents.contentPath(doc.id), setFraction, signal),
-    enabled: doc.status === 'ready' && !!preview,
+    // PDFs are loaded by DocumentPdf (in ranges when large).
+    enabled: doc.status === 'ready' && !!preview && preview !== 'pdf',
     staleTime: Infinity,
     gcTime: 5 * 60_000,
     retry: 1,
@@ -50,9 +51,9 @@ function Preview({ doc }: { doc: DocumentMeta }) {
       />
     );
   }
+  if (preview === 'pdf') return <DocumentPdf doc={doc} className="h-[calc(100dvh-14rem)] min-h-[420px] overflow-hidden rounded-xl border border-border" />;
   if (file.isLoading) return <DownloadProgress fraction={fraction} />;
   if (file.isError || !file.data) return <ErrorState error={file.error} onRetry={() => void file.refetch()} />;
-  if (preview === 'pdf') return <PdfViewer data={file.data} className="h-[calc(100dvh-14rem)] min-h-[420px] overflow-hidden rounded-xl border border-border" />;
   if (preview === 'image') {
     return (
       <div className="flex justify-center rounded-xl border border-border bg-surface-2 p-4">

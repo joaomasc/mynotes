@@ -26,11 +26,10 @@ import { Menu } from '@/components/ui/menu';
 import { ApiError, errorMessage, isVersionConflict } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
-import { fetchWithProgress } from '@/lib/download';
 import { longDate, relativeTime } from '@/lib/format';
 import { qk } from '@/lib/query';
 import { uploadNewDocument, validateFile } from '@/lib/uploads';
-import { DownloadProgress, PdfViewer, type PdfSelection } from '../documents/pdf-viewer';
+import { DocumentPdf, type PdfSelection } from '../documents/pdf-viewer';
 import type { NoteEditorHandle } from '../notes/editor/note-editor';
 import { EmbeddedNote } from '../notes/embedded-note';
 import { BacklinkList } from '../notes/note-page';
@@ -69,15 +68,6 @@ function Reader({
   onPage: (page: number, total: number) => void;
   onSelection: (s: PdfSelection | null) => void;
 }) {
-  const [fraction, setFraction] = useState<number | null>(null);
-  const file = useQuery({
-    queryKey: ['document-file', doc.id, doc.version],
-    queryFn: ({ signal }) => fetchWithProgress(endpoints.documents.contentPath(doc.id), setFraction, signal),
-    enabled: doc.status === 'ready',
-    staleTime: Infinity,
-    gcTime: 5 * 60_000,
-    retry: 1,
-  });
   // The page where the reading stopped is read once, when the file opens.
   const [initialPage] = useState(reading.currentPage);
   if (doc.status !== 'ready') {
@@ -87,11 +77,9 @@ function Reader({
       </p>
     );
   }
-  if (file.isLoading) return <DownloadProgress fraction={fraction} />;
-  if (file.isError || !file.data) return <ErrorState error={file.error} onRetry={() => void file.refetch()} />;
   return (
-    <PdfViewer
-      data={file.data}
+    <DocumentPdf
+      doc={doc}
       className="h-[62dvh] overflow-hidden rounded-xl border border-border lg:h-[calc(100dvh-9rem)]"
       initialPage={initialPage}
       goto={goto}

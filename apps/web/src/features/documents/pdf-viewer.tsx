@@ -1,15 +1,61 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
-import { GlobalWorkerOptions, TextLayer, getDocument } from 'pdfjs-dist';
+import { GlobalWorkerOptions, PDFDataRangeTransport, TextLayer, getDocument } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { IconButton } from '@/components/ui/button';
-import { Progress, Spinner } from '@/components/ui/feedback';
+import { useQuery } from '@tanstack/react-query';
+import type { DocumentMeta } from '@mynotes/shared';
+import { Button, IconButton } from '@/components/ui/button';
+import { ErrorState, Progress, Spinner } from '@/components/ui/feedback';
+import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
+import { fetchRange, fetchWithProgress } from '@/lib/download';
 import './pdf-viewer.css';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 const ASSETS = `${import.meta.env.BASE_URL}pdfjs/`;
+
+/**
+ * Above this size a PDF is read in ranges (only the parts needed for the
+ * pages being shown) instead of being downloaded whole before display.
+ */
+export const PDF_RANGE_THRESHOLD = 20 * 1024 * 1024;
+const RANGE_CHUNK_BYTES = 1024 * 1024;
+
+/** Whole file already downloaded, or a stored document read in ranges. */
+export type PdfSource = { data: ArrayBuffer } | { documentId: string; size: number };
+
+/**
+ * Feeds pdf.js with byte ranges fetched on demand through the API client
+ * (authenticated, session renewed during long reading sessions).
+ */
+class ApiRangeTransport extends PDFDataRangeTransport {
+  private stopped = false;
+  constructor(
+    private readonly path: string,
+    length: number,
+    private readonly onFail: () => void,
+  ) {
+    super(length, null);
+  }
+  override requestDataRange(begin: number, end: number): void {
+    const attempt = async (n: number): Promise<void> => {
+      try {
+        const chunk = await fetchRange(this.path, begin, end);
+        if (!this.stopped) this.onDataRange(begin, chunk);
+      } catch {
+        if (this.stopped) return;
+        if (n >= 3) return this.onFail();
+        await new Promise((r) => setTimeout(r, 800 * 2 ** n));
+        return attempt(n + 1);
+      }
+    };
+    void attempt(0);
+  }
+  override abort(): void {
+    this.stopped = true;
+  }
+}
 
 interface PageProps {
   doc: PDFDocumentProxy;
@@ -113,7 +159,7 @@ export interface PdfSelection {
 
 /** In-app PDF viewer. The file bytes are fetched with authentication by the caller. */
 export function PdfViewer({
-  data,
+  source,
   className,
   initialPage,
   goto,
@@ -122,7 +168,7 @@ export function PdfViewer({
   markers,
   onSelection,
 }: {
-  data: ArrayBuffer;
+  source: PdfSource;
   className?: string;
   /** Page shown when the document opens (e.g. where the reading stopped). */
   initialPage?: number | null | undefined;
@@ -143,18 +189,32 @@ export function PdfViewer({
   const [scale, setScale] = useState<number | 'fit'>('fit');
   const [current, setCurrent] = useState(1);
   const [width, setWidth] = useState(800);
+  const [attempt, setAttempt] = useState(0);
   const [goTo, setGoTo] = useState('1');
 
   useEffect(() => {
     let destroyed = false;
-    const task = getDocument({
-      // pdf.js transfers the buffer to its worker: give it a copy.
-      data: new Uint8Array(data.slice(0)),
+    setError(null);
+    const assets = {
       cMapUrl: `${ASSETS}cmaps/`,
       cMapPacked: true,
       standardFontDataUrl: `${ASSETS}standard_fonts/`,
       wasmUrl: `${ASSETS}wasm/`,
-    });
+    };
+    const task =
+      'data' in source
+        ? // pdf.js transfers the buffer to its worker: give it a copy.
+          getDocument({ ...assets, data: new Uint8Array(source.data.slice(0)) })
+        : getDocument({
+            ...assets,
+            range: new ApiRangeTransport(endpoints.documents.contentPath(source.documentId), source.size, () => {
+              if (!destroyed) setError('Não foi possível carregar uma parte do PDF. Verifique a conexão.');
+            }),
+            rangeChunkSize: RANGE_CHUNK_BYTES,
+            // Fetch only what the visible pages need.
+            disableAutoFetch: true,
+            disableStream: true,
+          });
     task.promise
       .then(async (pdf) => {
         if (destroyed) return;
@@ -169,7 +229,7 @@ export function PdfViewer({
       destroyed = true;
       void task.destroy();
     };
-  }, [data]);
+  }, [source, attempt]);
 
   useEffect(() => {
     const el = container.current;
@@ -201,10 +261,12 @@ export function PdfViewer({
 
   // Open at the requested page (instantly: page placeholders already have their size).
   const opened = useRef(false);
+  const pendingJump = useRef<number | null>(null);
   useEffect(() => {
     if (!doc || opened.current) return;
     opened.current = true;
-    const target = Math.min(Math.max(1, initialPage ?? 1), doc.numPages);
+    const target = Math.min(Math.max(1, pendingJump.current ?? initialPage ?? 1), doc.numPages);
+    pendingJump.current = null;
     if (target > 1) requestAnimationFrame(() => pages.current.get(target)?.scrollIntoView({ block: 'start' }));
   }, [doc, initialPage]);
 
@@ -231,13 +293,28 @@ export function PdfViewer({
     else pages.current.delete(n);
   }, []);
   const jump = (n: number) => {
-    if (!doc) return;
+    // Asked before the file opened (large PDFs take a moment): go there once it does.
+    if (!doc) {
+      pendingJump.current = n;
+      return;
+    }
     const target = Math.min(Math.max(1, n), doc.numPages);
     pages.current.get(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   const zoom = (factor: number) => setScale(Math.max(0.3, Math.min(4, Math.round(effectiveScale * factor * 100) / 100)));
 
-  if (error) return <p className="rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger">{error}</p>;
+  if (error) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-lg bg-danger-soft px-4 py-3 text-sm text-danger">
+        <span className="flex-1">{error}</span>
+        {!('data' in source) && (
+          <Button size="sm" variant="outline" onClick={() => setAttempt((a) => a + 1)}>
+            Tentar de novo
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
@@ -312,4 +389,32 @@ export function DownloadProgress({ fraction }: { fraction: number | null }) {
       {fraction !== null && <Progress value={fraction * 100} className="max-w-60" label="Baixando arquivo" />}
     </div>
   );
+}
+
+/**
+ * PDF of a stored document: small files are downloaded whole (one request,
+ * with progress); large ones are read in ranges, so a 300 MB book opens as
+ * soon as its first pages arrive and never needs to fit in memory at once.
+ */
+export function DocumentPdf({
+  doc,
+  ...viewer
+}: { doc: DocumentMeta } & Omit<Parameters<typeof PdfViewer>[0], 'source'>) {
+  const ranged = doc.sizeBytes > PDF_RANGE_THRESHOLD;
+  const [fraction, setFraction] = useState<number | null>(null);
+  const file = useQuery({
+    queryKey: ['document-file', doc.id, doc.version],
+    queryFn: ({ signal }) => fetchWithProgress(endpoints.documents.contentPath(doc.id), setFraction, signal),
+    enabled: !ranged,
+    staleTime: Infinity,
+    gcTime: 5 * 60_000,
+    retry: 1,
+  });
+  const rangeSource = useMemo<PdfSource>(() => ({ documentId: doc.id, size: doc.sizeBytes }), [doc.id, doc.sizeBytes]);
+  const dataSource = useMemo<PdfSource | null>(() => (file.data ? { data: file.data } : null), [file.data]);
+
+  if (ranged) return <PdfViewer source={rangeSource} {...viewer} />;
+  if (file.isLoading) return <DownloadProgress fraction={fraction} />;
+  if (file.isError || !dataSource) return <ErrorState error={file.error} onRetry={() => void file.refetch()} />;
+  return <PdfViewer source={dataSource} {...viewer} />;
 }

@@ -31,6 +31,17 @@ export async function fetchWithProgress(
   return out.buffer;
 }
 
+/**
+ * Authenticated download of bytes [begin, end) of a file. Goes through the
+ * API client, so the session is renewed during long reading sessions.
+ */
+export async function fetchRange(path: string, begin: number, end: number, signal?: AbortSignal): Promise<Uint8Array> {
+  const res = await request('GET', path, { signal, track: false, headers: { Range: `bytes=${begin}-${end - 1}` } });
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  // A server that ignores Range answers 200 with the whole file.
+  return res.status === 206 ? bytes : bytes.subarray(begin, end);
+}
+
 /** Opens a URL obtained asynchronously in a new tab without being blocked as a popup. */
 export async function openInNewTab(getUrl: () => Promise<string>): Promise<void> {
   const win = window.open('', '_blank');
