@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleCheck, FileText, RefreshCw, TriangleAlert, Upload, X } from 'lucide-react';
-import { ALLOWED_FILE_TYPES, UPLOAD_MAX_BYTES } from '@mynotes/shared';
+import { ALLOWED_FILE_TYPES } from '@mynotes/shared';
 import { Button, IconButton } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/feedback';
@@ -102,7 +102,7 @@ export function UploadDialog({
         onOpenChange(o);
       }}
       title="Enviar documentos"
-      description={`PDF, imagens, EPUB, DOCX, TXT e Markdown — até ${fileSize(UPLOAD_MAX_BYTES)} por arquivo.`}
+      description="PDF, imagens, EPUB, DOCX, TXT e Markdown, sem limite prático de tamanho (arquivos grandes são enviados em partes)."
       size="lg"
       footer={
         <>

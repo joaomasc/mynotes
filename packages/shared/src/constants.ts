@@ -50,8 +50,18 @@ export const NOTE_REVISION_INTERVAL_SECONDS = 10 * 60;
 export const PAGE_SIZE_DEFAULT = 50;
 export const PAGE_SIZE_MAX = 200;
 
-/** Upload limit. Workers accept request bodies up to 100 MB on Free/Pro accounts. */
-export const UPLOAD_MAX_BYTES = 95 * 1024 * 1024;
+/**
+ * Uploads. Workers accept request bodies up to 100 MB on Free/Pro accounts,
+ * so larger files are sent in parts (R2 multipart upload): every request
+ * stays below that limit and the file size is bounded only by R2.
+ */
+/** Files up to this size go in a single request; larger ones in parts of this size. */
+export const UPLOAD_PART_BYTES = 50 * 1024 * 1024;
+/** Largest body accepted by a single upload request (whole file or one part). */
+export const UPLOAD_REQUEST_MAX_BYTES = 95 * 1024 * 1024;
+/** R2 multipart allows 10,000 parts: about 488 GB with 50 MB parts. */
+export const UPLOAD_MAX_PARTS = 10_000;
+export const UPLOAD_MAX_BYTES = UPLOAD_PART_BYTES * UPLOAD_MAX_PARTS;
 
 /**
  * File types accepted in the library. `preview` describes what the web app

@@ -9,8 +9,8 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const KEY_RE = /^[A-Za-z0-9_-]{8,100}$/;
 /** Larger responses are not stored (the request is still applied). */
 const MAX_STORED_BYTES = 256 * 1024;
-/** Streaming uploads are naturally idempotent (same document id) and are excluded. */
-const EXCLUDED = [/\/documents\/[0-9a-f-]{36}\/content$/];
+/** Streaming uploads (whole files and parts) are naturally idempotent and are excluded: their bodies are large. */
+const EXCLUDED = [/\/documents\/[0-9a-f-]{36}\/content$/, /\/documents\/[0-9a-f-]{36}\/uploads\/parts\/\d+$/];
 
 /**
  * Replays the stored response when a mutating request is retried with the

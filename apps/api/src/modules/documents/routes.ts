@@ -1,6 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import {
   API_PREFIX,
+  UPLOAD_MAX_PARTS,
   zDocument,
   zDocumentCreate,
   zDocumentListQuery,
@@ -8,6 +9,11 @@ import {
   zId,
   zPageQuery,
   zSignedLink,
+  zUploadAbort,
+  zUploadComplete,
+  zUploadPartQuery,
+  zUploadStart,
+  zUploadedPart,
 } from '@mynotes/shared';
 import type { ApiApp } from '../../app';
 import { notFound } from '../../lib/errors';
@@ -113,6 +119,74 @@ export function documentRoutes(app: ApiApp) {
     async (c) => {
       const doc = await docs.uploadContent(c.env, c.get('userId'), c.req.valid('param').id, c.req.raw);
       return c.json({ data: doc }, 200);
+    },
+  );
+
+  /* Files larger than one request: start, send parts, complete (or abort). */
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/documents/{id}/uploads',
+      tags,
+      summary: 'Iniciar envio em partes (arquivos grandes)',
+      security: secured,
+      request: { params: idParam },
+      responses: { 200: ok(zUploadStart), ...errors },
+    }),
+    async (c) => c.json({ data: await docs.startMultipartUpload(c.env, c.get('userId'), c.req.valid('param').id) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'put',
+      path: '/documents/{id}/uploads/parts/{partNumber}',
+      tags,
+      summary: 'Enviar uma parte (streaming para o R2)',
+      description: 'Exige Content-Length. Todas as partes, exceto a última, devem ter o tamanho informado no início.',
+      security: secured,
+      request: {
+        params: z.object({ id: zId, partNumber: z.coerce.number().int().min(1).max(UPLOAD_MAX_PARTS) }),
+        query: zUploadPartQuery,
+        body: { content: { 'application/octet-stream': { schema: binary } } },
+      },
+      responses: { 200: ok(zUploadedPart), 413: errors[400], ...errors },
+    }),
+    async (c) => {
+      const { id, partNumber } = c.req.valid('param');
+      const part = await docs.uploadPart(c.env, c.get('userId'), id, partNumber, c.req.valid('query').token, c.req.raw);
+      return c.json({ data: part }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/documents/{id}/uploads/complete',
+      tags,
+      summary: 'Concluir envio em partes (valida o arquivo e o anexa ao documento)',
+      security: secured,
+      request: { params: idParam, body: jsonBody(zUploadComplete) },
+      responses: { 200: ok(zDocument), 415: errors[400], ...errors },
+    }),
+    async (c) => {
+      const { token, parts } = c.req.valid('json');
+      return c.json({ data: await docs.completeMultipartUpload(c.env, c.get('userId'), c.req.valid('param').id, token, parts) }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/documents/{id}/uploads/abort',
+      tags,
+      summary: 'Cancelar envio em partes',
+      security: secured,
+      request: { params: idParam, body: jsonBody(zUploadAbort) },
+      responses: { 204: noContent, ...errors },
+    }),
+    async (c) => {
+      await docs.abortMultipartUpload(c.env, c.get('userId'), c.req.valid('param').id, c.req.valid('json').token);
+      return c.body(null, 204);
     },
   );
 

@@ -57,6 +57,8 @@ import type {
   TopicWithCounts,
   TrashItem,
   UpcomingGoal,
+  UploadStart,
+  UploadedPart,
   User,
   ViewLayout,
   ViewLayoutData,
@@ -122,6 +124,13 @@ export const endpoints = {
     link: (id: string, download: boolean) =>
       api.post<{ url: string; expiresAt: string }>(`/documents/${id}/link`, { download }),
     contentPath: (id: string) => `/documents/${id}/content`,
+    // Large files: upload in parts.
+    startUpload: (id: string) => api.post<UploadStart>(`/documents/${id}/uploads`, {}, { retries: 0 }),
+    uploadPartPath: (id: string, part: number, token: string) =>
+      `/documents/${id}/uploads/parts/${part}?token=${encodeURIComponent(token)}`,
+    completeUpload: (id: string, token: string, parts: UploadedPart[]) =>
+      api.post<DocumentMeta>(`/documents/${id}/uploads/complete`, { token, parts }),
+    abortUpload: (id: string, token: string) => api.post(`/documents/${id}/uploads/abort`, { token }, { retries: 0, track: false }),
   },
 
   readings: {

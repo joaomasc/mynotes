@@ -1,16 +1,21 @@
 import {
   ALLOWED_FILE_TYPES,
   UPLOAD_MAX_BYTES,
+  UPLOAD_MAX_PARTS,
+  UPLOAD_PART_BYTES,
+  UPLOAD_REQUEST_MAX_BYTES,
   mimeFromFileName,
   normalizeAligned,
   searchTerms,
   uuidv7,
   type AllowedMimeType,
   type DocumentMeta,
+  type UploadStart,
+  type UploadedPart,
 } from '@mynotes/shared';
 import { authSecret } from '../../env';
 import { ApiError, badRequest, notFound, tooLarge } from '../../lib/errors';
-import { hmacBase64Url, hmacVerify, randomToken } from '../../lib/crypto';
+import { hmacBase64Url, hmacVerify, randomToken, toBase64Url } from '../../lib/crypto';
 import { all, first, num, str, strOrNull, stmt, versionedUpdate, type Bindable, type Row } from '../../lib/db';
 import { activityStmt, assertReference } from '../../lib/helpers';
 import { keyset, pageOf, type SortSpec } from '../../lib/pagination';
@@ -121,9 +126,8 @@ export async function createDocument(
     return { document: toDocument(existing), created: false };
   }
   const mime = assertAllowedType(input.originalName, input.mimeType);
-  if (input.sizeBytes > UPLOAD_MAX_BYTES) {
-    throw tooLarge(`Arquivo maior que o limite de ${Math.floor(UPLOAD_MAX_BYTES / 1024 / 1024)} MB`);
-  }
+  // Files larger than one request are uploaded in parts; only R2's own capacity bounds the size.
+  if (input.sizeBytes > UPLOAD_MAX_BYTES) throw tooLarge('Arquivo maior do que o armazenamento suporta');
   await assertReference(db, 'topics', input.topicId, userId);
   const originalName = input.originalName.normalize('NFC');
   const title = (input.title?.trim() || originalName.replace(/\.[^.]+$/, '')).normalize('NFC').slice(0, 300);
@@ -172,23 +176,30 @@ function signatureMatches(mime: string, head: Uint8Array): boolean {
   }
 }
 
+/** Content-Length of an upload request (whole file or one part), within what a Worker accepts. */
+function bodyLength(request: Request): number {
+  const length = Number.parseInt(request.headers.get('Content-Length') ?? '', 10);
+  if (!Number.isFinite(length) || length <= 0) throw badRequest('Content-Length obrigatório');
+  if (length > UPLOAD_REQUEST_MAX_BYTES) throw tooLarge('Envie arquivos grandes em partes');
+  if (!request.body) throw badRequest('Corpo da requisição vazio');
+  return length;
+}
+
 /**
  * Streams the request body to R2 under a new random key, validates the file
  * signature, then atomically switches the document to the new object.
+ * Files larger than one request use the multipart functions below.
  */
 export async function uploadContent(env: Env, userId: string, id: string, request: Request): Promise<DocumentMeta> {
   const db = env.DB;
   const doc = await getDocumentRow(db, userId, id);
   if (!doc) throw notFound('Documento');
-  const length = Number.parseInt(request.headers.get('Content-Length') ?? '', 10);
-  if (!Number.isFinite(length) || length <= 0) throw badRequest('Content-Length obrigatório');
-  if (length > UPLOAD_MAX_BYTES) throw tooLarge('Arquivo maior que o limite permitido');
-  if (!request.body) throw badRequest('Corpo da requisição vazio');
+  const length = bodyLength(request);
   const mime = str(doc.mime_type);
 
   const key = `files/${userId}/${randomToken(24)}`;
   const { readable, writable } = new FixedLengthStream(length);
-  const pipe = request.body.pipeTo(writable);
+  const pipe = request.body!.pipeTo(writable); // checked by bodyLength()
   try {
     await Promise.all([
       env.FILES.put(key, readable, {
@@ -203,7 +214,17 @@ export async function uploadContent(env: Env, userId: string, id: string, reques
     }
     throw badRequest('Falha ao receber o arquivo. Tente novamente.');
   }
+  return finalizeUpload(env, userId, doc, key, length);
+}
 
+/**
+ * The object is fully stored under `key`: checks its signature, then points
+ * the document to it (removing the previous file, if any).
+ */
+async function finalizeUpload(env: Env, userId: string, doc: Row, key: string, length: number): Promise<DocumentMeta> {
+  const db = env.DB;
+  const id = str(doc.id);
+  const mime = str(doc.mime_type);
   const head = await env.FILES.get(key, { range: { offset: 0, length: 16 } });
   const bytes = new Uint8Array(head ? await head.arrayBuffer() : new ArrayBuffer(0));
   if (!signatureMatches(mime, bytes)) {
@@ -235,6 +256,109 @@ export async function uploadContent(env: Env, userId: string, id: string, reques
   }
   if (oldKey && oldKey !== key) await env.FILES.delete(oldKey);
   return toDocument(row);
+}
+
+/* ---------------------------------------------------- upload in parts -- */
+
+/**
+ * The client keeps no server state between parts: a token signed with
+ * AUTH_SECRET binds the account, document, R2 key and upload id, so a part
+ * can never target another key or another user's file.
+ */
+interface UploadTicket {
+  d: string; // document
+  u: string; // user
+  k: string; // R2 key
+  m: string; // R2 multipart upload id
+  e: number; // expiry (ms)
+}
+
+const TICKET_TTL_MS = 24 * 3600 * 1000;
+
+async function signTicket(env: Env, ticket: UploadTicket): Promise<string> {
+  const body = toBase64Url(new TextEncoder().encode(JSON.stringify(ticket)));
+  return `${body}.${await hmacBase64Url(authSecret(env), `upload:${body}`)}`;
+}
+
+async function readTicket(env: Env, token: string, userId: string, documentId: string): Promise<UploadTicket> {
+  const invalid = () => badRequest('Envio inválido ou expirado. Envie o arquivo de novo.');
+  const [body, sig] = token.split('.');
+  if (!body || !sig || !(await hmacVerify(authSecret(env), `upload:${body}`, sig))) throw invalid();
+  let ticket: UploadTicket;
+  try {
+    ticket = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(body.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))));
+  } catch {
+    throw invalid();
+  }
+  if (ticket.d !== documentId || ticket.u !== userId || ticket.e < Date.now()) throw invalid();
+  return ticket;
+}
+
+/** Starts an upload in parts for a document (new random key, like single uploads). */
+export async function startMultipartUpload(env: Env, userId: string, id: string): Promise<UploadStart> {
+  const doc = await getDocumentRow(env.DB, userId, id);
+  if (!doc) throw notFound('Documento');
+  const key = `files/${userId}/${randomToken(24)}`;
+  const upload = await env.FILES.createMultipartUpload(key, {
+    httpMetadata: { contentType: str(doc.mime_type) },
+    customMetadata: { documentId: id },
+  });
+  const token = await signTicket(env, { d: id, u: userId, k: key, m: upload.uploadId, e: Date.now() + TICKET_TTL_MS });
+  return { token, partSize: UPLOAD_PART_BYTES };
+}
+
+/** Streams one part (all parts but the last must have the same size, as R2 requires). */
+export async function uploadPart(
+  env: Env,
+  userId: string,
+  id: string,
+  partNumber: number,
+  token: string,
+  request: Request,
+): Promise<UploadedPart> {
+  const ticket = await readTicket(env, token, userId, id);
+  if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > UPLOAD_MAX_PARTS) throw badRequest('Parte inválida');
+  const length = bodyLength(request);
+  const upload = env.FILES.resumeMultipartUpload(ticket.k, ticket.m);
+  const { readable, writable } = new FixedLengthStream(length);
+  try {
+    const [part] = await Promise.all([upload.uploadPart(partNumber, readable), request.body!.pipeTo(writable)]); // body checked by bodyLength()
+    return { partNumber: part.partNumber, etag: part.etag };
+  } catch {
+    throw badRequest('Falha ao receber uma parte do arquivo. Tente novamente.');
+  }
+}
+
+/** Joins the parts, then validates and attaches the file like a single upload. */
+export async function completeMultipartUpload(
+  env: Env,
+  userId: string,
+  id: string,
+  token: string,
+  parts: UploadedPart[],
+): Promise<DocumentMeta> {
+  const ticket = await readTicket(env, token, userId, id);
+  const upload = env.FILES.resumeMultipartUpload(ticket.k, ticket.m);
+  const doc = await getDocumentRow(env.DB, userId, id);
+  if (!doc) {
+    await upload.abort().catch(() => undefined);
+    throw notFound('Documento');
+  }
+  let object: R2Object;
+  try {
+    object = await upload.complete([...parts].sort((a, b) => a.partNumber - b.partNumber));
+  } catch {
+    throw badRequest('Não foi possível juntar as partes do arquivo. Envie de novo.');
+  }
+  return finalizeUpload(env, userId, doc, ticket.k, object.size);
+}
+
+/** Discards an unfinished upload in parts (R2 also expires abandoned ones). */
+export async function abortMultipartUpload(env: Env, userId: string, id: string, token: string): Promise<void> {
+  const ticket = await readTicket(env, token, userId, id);
+  await env.FILES.resumeMultipartUpload(ticket.k, ticket.m)
+    .abort()
+    .catch(() => undefined);
 }
 
 function contentDisposition(kind: 'inline' | 'attachment', filename: string): string {

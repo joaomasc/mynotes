@@ -33,8 +33,8 @@ export function createApp(modules: RouteModule[] = []): OpenAPIHono<AppEnv> {
   });
 
   api.use('*', async (c, next) => {
-    // Streaming uploads are bounded separately by the documents module.
-    if (c.req.method === 'PUT' && c.req.path.endsWith('/content')) return next();
+    // Streaming uploads (whole file or one part) are bounded separately by the documents module.
+    if (c.req.method === 'PUT' && /\/(content|uploads\/parts\/\d+)$/.test(c.req.path)) return next();
     return bodyLimit({
       maxSize: JSON_BODY_LIMIT,
       onError: () => {

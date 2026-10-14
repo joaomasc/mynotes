@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { login, samplePdf } from './helpers';
 
@@ -44,4 +44,23 @@ test('exports a backup and imports it again without duplicating', async ({ page 
   await expect(page.getByText('Importação concluída').first()).toBeVisible({ timeout: 60_000 });
   await page.goto('/notes');
   await expect(page.locator('main a[href*="/notes/"]')).toHaveCount(before);
+});
+
+test('uploads a file larger than one request (sent in parts)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const parts: number[] = [];
+  page.on('request', (r) => {
+    const m = /\/uploads\/parts\/(\d+)/.exec(r.url());
+    if (m && r.method() === 'PUT') parts.push(Number(m[1]));
+  });
+  // 55 MB: two parts (50 MB + 5 MB). Starts like a real PDF so the type check passes.
+  const big = Buffer.concat([samplePdf([['Arquivo grande']]), Buffer.alloc(55 * 1024 * 1024, 0x20)]);
+  await page.goto('/library?view=docs');
+  await page.getByRole('button', { name: 'Enviar', exact: true }).click();
+  const path = test.info().outputPath('grande-e2e.pdf');
+  writeFileSync(path, big);
+  await page.locator('input[type=file]').setInputFiles(path);
+  await page.getByRole('button', { name: /Enviar \(1\)/ }).click();
+  await expect(page.getByLabel('Enviado')).toBeVisible({ timeout: 150_000 });
+  expect(parts).toEqual([1, 2]);
 });

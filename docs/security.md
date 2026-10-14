@@ -13,7 +13,7 @@ O MyNotes guarda conteúdo privado de uma única pessoa. Ameaças consideradas:
 | Acesso a arquivos por URL | Bucket R2 privado; nomes aleatórios; download autenticado ou link HMAC válido por 5 min e vinculado ao modo (inline/download). |
 | Enumeração de usuários | `prelogin` devolve parâmetros falsos determinísticos para usuários inexistentes; mensagens de erro genéricas e tempo de resposta equalizado. |
 | Replays | Desafios de renovação são de uso único (registrados após a verificação) e expiram em 60 s; mutações aceitam `Idempotency-Key`. |
-| Abuso de recursos | Corpo JSON limitado a 2 MB, upload a 95 MB, paginação com limite, conteúdo de nota a 600 KB. Recomenda-se uma regra de rate limiting da Cloudflare (WAF) para a rota do Worker. |
+| Abuso de recursos | Corpo JSON limitado a 2 MB; cada requisição de upload a 95 MB (arquivos maiores vão em partes com token assinado que amarra conta, documento e chave no R2); paginação com limite, conteúdo de nota a 600 KB. Recomenda-se uma regra de rate limiting da Cloudflare (WAF) para a rota do Worker. |
 
 ## Senha
 

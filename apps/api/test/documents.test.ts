@@ -70,9 +70,66 @@ describe('documents', () => {
     expect(listed.objects).toHaveLength(0);
   });
 
-  it('rejects files above the size limit', async () => {
-    const res = await http.post('/documents', { originalName: 'big.pdf', mimeType: 'application/pdf', sizeBytes: 500 * 1024 * 1024 });
-    expect(res.status).toBe(413);
+  it('accepts large files (sent in parts) and rejects single requests above the Worker limit', async () => {
+    const big = await http.post('/documents', { originalName: 'big.pdf', mimeType: 'application/pdf', sizeBytes: 500 * 1024 * 1024 });
+    expect(big.status).toBe(201);
+    const huge = await http.post('/documents', { originalName: 'x.pdf', mimeType: 'application/pdf', sizeBytes: 600 * 1024 ** 3 });
+    expect(huge.status).toBe(413);
+    const tooBigForOneRequest = await api('PUT', `/documents/${big.body.data.id}/content`, {
+      token: owner.token,
+      rawBody: PDF,
+      headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(200 * 1024 * 1024) },
+    });
+    expect(tooBigForOneRequest.status).toBe(413);
+  });
+
+  it('uploads a file in parts and serves it whole', async () => {
+    const first = new Uint8Array(5 * 1024 * 1024).fill(0x20); // R2: every part but the last has at least 5 MiB
+    first.set(PDF.subarray(0, 8));
+    const last = new TextEncoder().encode('\n%%EOF\n');
+    const doc = await register('grande.pdf', 'application/pdf', first.byteLength + last.byteLength);
+    const start = await http.post(`/documents/${doc.id}/uploads`);
+    expect(start.status).toBe(200);
+    const { token } = start.body.data;
+
+    const sendPart = (n: number, bytes: Uint8Array, t = token, docId = doc.id) =>
+      api('PUT', `/documents/${docId}/uploads/parts/${n}?token=${encodeURIComponent(t)}`, {
+        token: owner.token,
+        rawBody: bytes,
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(bytes.byteLength) },
+      });
+    const p1 = await sendPart(1, first);
+    expect(p1.status).toBe(200);
+    const p2 = await sendPart(2, last);
+    const parts = [(await p1.json() as { data: object }).data, (await p2.json() as { data: object }).data];
+
+    // The token is bound to this document and cannot be forged.
+    const other = await register('outro.pdf');
+    expect((await sendPart(1, last, token, other.id)).status).toBe(400);
+    expect((await sendPart(1, last, `${token.split('.')[0]}.forjada`)).status).toBe(400);
+
+    const done = await http.post(`/documents/${doc.id}/uploads/complete`, { token, parts });
+    expect(done.status).toBe(200);
+    expect(done.body.data).toMatchObject({ status: 'ready', sizeBytes: first.byteLength + last.byteLength });
+    const down = await api('GET', `/documents/${doc.id}/content`, { token: owner.token });
+    expect((await down.arrayBuffer()).byteLength).toBe(first.byteLength + last.byteLength);
+  });
+
+  it('rejects a file in parts whose content is not of the declared type, and can abort', async () => {
+    const doc = await register('falso.pdf', 'application/pdf', 20);
+    const { token } = (await http.post(`/documents/${doc.id}/uploads`)).body.data;
+    const html = new TextEncoder().encode('<html>not a pdf</html>');
+    const part = await api('PUT', `/documents/${doc.id}/uploads/parts/1?token=${encodeURIComponent(token)}`, {
+      token: owner.token,
+      rawBody: html,
+      headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(html.byteLength) },
+    });
+    const done = await http.post(`/documents/${doc.id}/uploads/complete`, { token, parts: [(await part.json() as { data: object }).data] });
+    expect(done.status).toBe(415);
+    expect((await env.FILES.list({ prefix: `files/${owner.user.id}/` })).objects).toHaveLength(0);
+
+    const second = (await http.post(`/documents/${doc.id}/uploads`)).body.data;
+    expect((await http.post(`/documents/${doc.id}/uploads/abort`, { token: second.token })).status).toBe(204);
   });
 
   it('issues short-lived signed links', async () => {

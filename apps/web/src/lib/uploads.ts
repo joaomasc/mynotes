@@ -1,11 +1,13 @@
 import {
   ALLOWED_FILE_TYPES,
   UPLOAD_MAX_BYTES,
+  UPLOAD_PART_BYTES,
   mimeFromFileName,
   uuidv7,
   type AllowedMimeType,
   type ApiErrorBody,
   type DocumentMeta,
+  type UploadedPart,
 } from '@mynotes/shared';
 import { ApiError, NetworkError, buildUrl } from './api/client';
 import { endpoints } from './api/endpoints';
@@ -21,7 +23,8 @@ export function validateFile(file: File): { mime: AllowedMimeType } | { error: s
     return { error: `Formato não suportado. Aceitos: ${accepted}.` };
   }
   if (file.size === 0) return { error: 'O arquivo está vazio.' };
-  if (file.size > UPLOAD_MAX_BYTES) return { error: `Maior que o limite de ${fileSize(UPLOAD_MAX_BYTES)}.` };
+  // No practical limit: large files are sent in parts. This is R2's own capacity.
+  if (file.size > UPLOAD_MAX_BYTES) return { error: `Maior do que o armazenamento suporta (${fileSize(UPLOAD_MAX_BYTES)}).` };
   return { mime };
 }
 
@@ -47,6 +50,74 @@ function putWithProgress(
   });
 }
 
+/** Authenticated PUT of binary data with progress (renews the session once on 401). */
+async function putAuthorized<T>(path: string, body: Blob, mime: string, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<T> {
+  const url = buildUrl(path);
+  let token = await getAccessToken();
+  if (!token) throw new ApiError(401, 'unauthorized', 'Sessão expirada');
+  let res = await putWithProgress(url, body, mime, token, onProgress, signal);
+  if (res.status === 401) {
+    token = await getAccessToken(true);
+    if (!token) throw new ApiError(401, 'unauthorized', 'Sessão expirada');
+    res = await putWithProgress(url, body, mime, token, onProgress, signal);
+  }
+  if (res.status >= 200 && res.status < 300) return (JSON.parse(res.body) as { data: T }).data;
+  let err: ApiErrorBody | null = null;
+  try {
+    err = JSON.parse(res.body) as ApiErrorBody;
+  } catch {
+    // not JSON
+  }
+  throw new ApiError(res.status, err?.error.code ?? 'internal_error', err?.error.message ?? 'Falha no envio');
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Sends a large file in parts. Each request stays below the Worker body
+ * limit; a failed part is retried, and if the upload cannot finish it is
+ * aborted on the server.
+ */
+async function uploadInParts(
+  documentId: string,
+  file: Blob,
+  onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<DocumentMeta> {
+  const { token, partSize } = await endpoints.documents.startUpload(documentId);
+  const parts: UploadedPart[] = [];
+  let sent = 0;
+  try {
+    for (let offset = 0, n = 1; offset < file.size; offset += partSize, n++) {
+      const chunk = file.slice(offset, offset + partSize);
+      for (let attempt = 1; ; attempt++) {
+        try {
+          parts.push(
+            await putAuthorized<UploadedPart>(
+              endpoints.documents.uploadPartPath(documentId, n, token),
+              chunk,
+              'application/octet-stream',
+              (f) => onProgress((sent + f * chunk.size) / file.size),
+              signal,
+            ),
+          );
+          break;
+        } catch (err) {
+          const transient = err instanceof NetworkError || (err instanceof ApiError && err.status >= 500);
+          if (!transient || attempt >= 4 || signal?.aborted) throw err;
+          await sleep(1000 * 2 ** (attempt - 1));
+        }
+      }
+      sent += chunk.size;
+      onProgress(sent / file.size);
+    }
+    return await endpoints.documents.completeUpload(documentId, token, parts);
+  } catch (err) {
+    void endpoints.documents.abortUpload(documentId, token).catch(() => undefined);
+    throw err;
+  }
+}
+
 /** Sends the binary of an existing document (also used to complete imported backups). */
 export async function uploadContent(
   documentId: string,
@@ -55,23 +126,8 @@ export async function uploadContent(
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
 ): Promise<DocumentMeta> {
-  const url = buildUrl(endpoints.documents.contentPath(documentId));
-  let token = await getAccessToken();
-  if (!token) throw new ApiError(401, 'unauthorized', 'Sessão expirada');
-  let res = await putWithProgress(url, file, mime, token, onProgress, signal);
-  if (res.status === 401) {
-    token = await getAccessToken(true);
-    if (!token) throw new ApiError(401, 'unauthorized', 'Sessão expirada');
-    res = await putWithProgress(url, file, mime, token, onProgress, signal);
-  }
-  if (res.status >= 200 && res.status < 300) return (JSON.parse(res.body) as { data: DocumentMeta }).data;
-  let err: ApiErrorBody | null = null;
-  try {
-    err = JSON.parse(res.body) as ApiErrorBody;
-  } catch {
-    // not JSON
-  }
-  throw new ApiError(res.status, err?.error.code ?? 'internal_error', err?.error.message ?? 'Falha no envio');
+  if (file.size > UPLOAD_PART_BYTES) return uploadInParts(documentId, file, onProgress, signal);
+  return putAuthorized<DocumentMeta>(endpoints.documents.contentPath(documentId), file, mime, onProgress, signal);
 }
 
 /** Registers the document metadata, then uploads the file. */

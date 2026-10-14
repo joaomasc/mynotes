@@ -8,6 +8,7 @@ import {
   PLAN_STATUSES,
   READING_STATUSES,
   TOPIC_TITLE_MAX,
+  UPLOAD_MAX_PARTS,
 } from '../constants';
 import {
   zColor,
@@ -234,6 +235,20 @@ export const zDocumentListQuery = z.object({
 });
 
 export const zSignedLink = z.object({ url: z.string(), expiresAt: zDateTime });
+
+/* Upload in parts (files larger than UPLOAD_PART_BYTES). */
+const zUploadToken = z.string().min(20).max(2000);
+export const zUploadStart = z.object({
+  /** Signed by the server: identifies the account, document and R2 upload. */
+  token: zUploadToken,
+  partSize: z.number().int(),
+});
+export type UploadStart = z.infer<typeof zUploadStart>;
+export const zUploadedPart = z.object({ partNumber: z.number().int().min(1).max(UPLOAD_MAX_PARTS), etag: z.string().min(1).max(200) });
+export type UploadedPart = z.infer<typeof zUploadedPart>;
+export const zUploadComplete = z.object({ token: zUploadToken, parts: z.array(zUploadedPart).min(1).max(UPLOAD_MAX_PARTS) });
+export const zUploadAbort = z.object({ token: zUploadToken });
+export const zUploadPartQuery = z.object({ token: zUploadToken });
 
 /* --------------------------------------------------------------- Readings */
 
