@@ -17,7 +17,7 @@
       "binding": "DB",
       "database_name": "mynotes",
       // Replace with the id printed by `wrangler d1 create mynotes` (see README).
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "4349777e-1be1-4f9b-b47b-c01799eaca8b",
       "migrations_dir": "migrations"
     }
   ],
@@ -31,7 +31,7 @@
     "ENVIRONMENT": "production",
     // Comma-separated exact origins allowed by CORS, e.g. "https://user.github.io".
     // Local development overrides this in .dev.vars.
-    "ALLOWED_ORIGINS": "https://YOUR_GITHUB_USER.github.io",
+    "ALLOWED_ORIGINS": "https://joaomasc.github.io",
     "SESSION_MAX_DAYS": "60",
     "SESSION_IDLE_DAYS": "14"
   }
