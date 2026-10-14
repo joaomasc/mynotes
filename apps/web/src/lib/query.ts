@@ -84,4 +84,10 @@ export const qk = {
   settings: ['settings'] as const,
   trash: ['trash'] as const,
   search: (q: string, types: string) => ['search', q, types] as const,
+  topicContext: (id: string) => ['topic-context', id] as const,
+  tags: (q: string) => ['tags', q] as const,
+  tagsAll: ['tags'] as const,
+  reference: (type: string, id: string) => ['reference', type, id] as const,
+  referencesAll: ['reference'] as const,
+  layout: (key: string) => ['layout', key] as const,
 };

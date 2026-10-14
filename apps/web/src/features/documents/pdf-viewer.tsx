@@ -18,10 +18,12 @@ interface PageProps {
   baseSize: { width: number; height: number };
   onVisible: (n: number) => void;
   register: (n: number, el: HTMLDivElement | null) => void;
+  /** Number of annotations on this page (shown as a marker). */
+  marks?: number | undefined;
 }
 
 /** One page: renders canvas + selectable text only when near the viewport. */
-function PdfPage({ doc, number, scale, baseSize, onVisible, register }: PageProps) {
+function PdfPage({ doc, number, scale, baseSize, onVisible, register, marks }: PageProps) {
   const wrapper = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const textLayer = useRef<HTMLDivElement>(null);
@@ -88,18 +90,51 @@ function PdfPage({ doc, number, scale, baseSize, onVisible, register }: PageProp
       }}
       className="pdf-page relative mx-auto bg-white shadow-card"
       style={{ width: size.width, height: size.height }}
-      aria-label={`Página ${number}`}
+      data-page={number}
+      aria-label={`Página ${number}${marks ? `, ${marks} anotação(ões)` : ''}`}
       role="img"
     >
       <canvas ref={canvas} className="block" />
       <div ref={textLayer} className="textLayer" />
+      {!!marks && (
+        <span className="pointer-events-none absolute top-2 -right-2 z-10 rounded-full bg-reading px-1.5 py-0.5 text-[11px] font-semibold text-white shadow-card">
+          {marks}
+        </span>
+      )}
       {!near && <span className="absolute inset-0 flex items-center justify-center text-xs text-subtle">{number}</span>}
     </div>
   );
 }
 
+export interface PdfSelection {
+  text: string;
+  page: number;
+}
+
 /** In-app PDF viewer. The file bytes are fetched with authentication by the caller. */
-export function PdfViewer({ data, className }: { data: ArrayBuffer; className?: string }) {
+export function PdfViewer({
+  data,
+  className,
+  initialPage,
+  goto,
+  onPageChange,
+  onLoaded,
+  markers,
+  onSelection,
+}: {
+  data: ArrayBuffer;
+  className?: string;
+  /** Page shown when the document opens (e.g. where the reading stopped). */
+  initialPage?: number | null | undefined;
+  /** Request to show a page; `seq` makes repeated requests for the same page work. */
+  goto?: { page: number; seq: number } | null | undefined;
+  onPageChange?: ((page: number, total: number) => void) | undefined;
+  onLoaded?: ((pages: number) => void) | undefined;
+  /** Annotations per page. */
+  markers?: Map<number, number> | undefined;
+  /** Text selected in the PDF (with its page), or null when the selection is cleared. */
+  onSelection?: ((selection: PdfSelection | null) => void) | undefined;
+}) {
   const container = useRef<HTMLDivElement>(null);
   const pages = useRef(new Map<number, HTMLDivElement>());
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
@@ -127,6 +162,7 @@ export function PdfViewer({ data, className }: { data: ArrayBuffer; className?: 
         const vp = first.getViewport({ scale: 1 });
         setBaseSize({ width: vp.width, height: vp.height });
         setDoc(pdf);
+        onLoadedRef.current?.(pdf.numPages);
       })
       .catch(() => !destroyed && setError('Não foi possível abrir este PDF. Ele pode estar corrompido ou protegido.'));
     return () => {
@@ -148,9 +184,47 @@ export function PdfViewer({ data, className }: { data: ArrayBuffer; className?: 
     return Math.max(0.3, Math.min(2.5, (width - 32) / baseSize.width));
   }, [scale, width, baseSize.width]);
 
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
+  const onPageChangeRef = useRef(onPageChange);
+  onPageChangeRef.current = onPageChange;
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
+
   const onVisible = useCallback((n: number) => {
     setCurrent(n);
     setGoTo(String(n));
+  }, []);
+  useEffect(() => {
+    if (doc) onPageChangeRef.current?.(current, doc.numPages);
+  }, [current, doc]);
+
+  // Open at the requested page (instantly: page placeholders already have their size).
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!doc || opened.current) return;
+    opened.current = true;
+    const target = Math.min(Math.max(1, initialPage ?? 1), doc.numPages);
+    if (target > 1) requestAnimationFrame(() => pages.current.get(target)?.scrollIntoView({ block: 'start' }));
+  }, [doc, initialPage]);
+
+  useEffect(() => {
+    if (!doc || !goto) return;
+    const target = Math.min(Math.max(1, goto.page), doc.numPages);
+    pages.current.get(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [doc, goto]);
+
+  // Report text selected inside the pages, with the page it belongs to.
+  useEffect(() => {
+    const onChange = () => {
+      const sel = document.getSelection();
+      const node = sel && !sel.isCollapsed ? sel.anchorNode : null;
+      const pageEl = node && container.current?.contains(node) ? (node.parentElement?.closest('[data-page]') ?? null) : null;
+      const text = sel?.toString().replace(/\s+/g, ' ').trim() ?? '';
+      onSelectionRef.current?.(pageEl && text ? { text: text.slice(0, 2000), page: Number(pageEl.getAttribute('data-page')) } : null);
+    };
+    document.addEventListener('selectionchange', onChange);
+    return () => document.removeEventListener('selectionchange', onChange);
   }, []);
   const register = useCallback((n: number, el: HTMLDivElement | null) => {
     if (el) pages.current.set(n, el);
@@ -221,6 +295,7 @@ export function PdfViewer({ data, className }: { data: ArrayBuffer; className?: 
                 baseSize={baseSize}
                 onVisible={onVisible}
                 register={register}
+                marks={markers?.get(i + 1)}
               />
             ))}
           </div>

@@ -92,8 +92,15 @@ export function Component() {
         <Block id="aparencia" title="Aparência" description="O tema escolhido vale para todos os seus dispositivos.">
           <Appearance />
         </Block>
-        <Block id="estudos" title="Meta de estudos">
+        <Block
+          id="estudos"
+          title="Estudos"
+          description="Sessões, cronômetro e tempo por assunto continuam guardados. Cada assunto mostra o seu tempo de estudo."
+        >
           <StudyGoal />
+          <Link to="/study" className="mt-4 inline-flex text-sm font-medium text-accent hover:underline">
+            Abrir o histórico de estudos
+          </Link>
         </Block>
         <Block id="conta" title="Conta e segurança" description={`Usuário: ${user?.username ?? ''}`}>
           <div className="space-y-8">

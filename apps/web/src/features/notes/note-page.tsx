@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -6,17 +6,19 @@ import { toast } from 'sonner';
 import {
   Check,
   CloudOff,
+  BookOpen,
   Copy,
   Ellipsis,
   FileClock,
   FolderInput,
+  Hash,
   Info,
   PanelRightClose,
   RefreshCw,
   Trash,
   TriangleAlert,
 } from 'lucide-react';
-import { uuidv7, type Note, type NoteRevisionSummary, type RichTextDoc } from '@mynotes/shared';
+import { ANNOTATION_TYPE_LABELS, analyzeDoc, uuidv7, type Backlink, type Note, type NoteRevisionSummary, type RichTextDoc } from '@mynotes/shared';
 import { Button, IconButton } from '@/components/ui/button';
 import { Dialog, useConfirm } from '@/components/ui/dialog';
 import { EmptyState, ErrorState, PageLoader, Spinner } from '@/components/ui/feedback';
@@ -28,6 +30,7 @@ import { cn } from '@/lib/cn';
 import { dateTime, plural, relativeTime } from '@/lib/format';
 import { useLocalPreference, useMediaQuery } from '@/lib/hooks';
 import { qk } from '@/lib/query';
+import { referencePath } from '@/lib/references';
 import { notesSync, type NoteDraft, type SaveState } from '@/lib/sync/notes-sync';
 import { FavoriteButton } from '../shared/favorite-button';
 import { RelationsPanel } from '../shared/relations-panel';
@@ -36,6 +39,7 @@ import { useRecordView } from '../shared/use-view';
 import { TopicSelect } from '../topics/topic-dialogs';
 import { noteExtensions } from './editor/extensions';
 import { NoteEditor, useSaveState, type NoteEditorHandle } from './editor/note-editor';
+import { justCreatedNotes } from './use-create-note';
 
 const STATUS: Record<SaveState, { label: string; icon: React.ReactNode; tone: string }> = {
   saved: { label: 'Salvo', icon: <Check className="size-3.5" />, tone: 'text-muted' },
@@ -181,8 +185,53 @@ function ConflictBanner({
   );
 }
 
+/** "Anotação · O Capital, p. 125" / "Resenha · O Capital": where a backlink comes from. */
+export function backlinkLabel(b: Pick<Backlink, 'role' | 'title' | 'readingTitle' | 'page'>): string {
+  if (b.role === 'annotation') return `Anotação · ${b.readingTitle ?? 'livro'}${b.page ? `, p. ${b.page}` : ''}${b.title ? ` — ${b.title}` : ''}`;
+  if (b.role === 'review') return `Resenha · ${b.readingTitle ?? 'livro'}`;
+  return b.title || 'Sem título';
+}
+
+export function BacklinkList({ items, empty }: { items: Backlink[] | undefined; empty: string }) {
+  if (!items?.length) return <p className="text-xs text-muted">{empty}</p>;
+  return (
+    <ul className="space-y-1">
+      {items.map((b) => (
+        <li key={b.noteId}>
+          <Link
+            to={referencePath({ type: 'note', id: b.noteId, role: b.role, readingId: b.readingId, page: b.page })}
+            className="block rounded-lg px-1.5 py-1 text-sm hover:bg-surface-2"
+          >
+            <span className="block truncate">{backlinkLabel(b)}</span>
+            {b.excerpt && <span className="block truncate text-xs text-muted">{b.excerpt}</span>}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function TagChips({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {tags.map((t) => (
+        <Link
+          key={t}
+          to={`/search?tag=${encodeURIComponent(t)}`}
+          className="inline-flex items-center rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent hover:underline"
+        >
+          <Hash className="size-3" aria-hidden />
+          {t}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 function NoteInfo({ note }: { note: Note }) {
   const back = useQuery({ queryKey: qk.backlinks('note', note.id), queryFn: () => endpoints.notes.backlinks('note', note.id) });
+  const tags = useMemo(() => analyzeDoc(structuredClone(note.content)).tags, [note.content]);
   return (
     <div className="space-y-6">
       <dl className="grid grid-cols-2 gap-3 text-xs">
@@ -203,24 +252,36 @@ function NoteInfo({ note }: { note: Note }) {
           <dd className="mt-0.5 tabular-nums">{note.version}</dd>
         </div>
       </dl>
+      {tags.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-[13px] font-semibold text-muted">Tags</h3>
+          <TagChips tags={tags} />
+        </div>
+      )}
       <RelationsPanel type="note" id={note.id} title={note.title} />
       <div>
         <h3 className="mb-2 text-[13px] font-semibold text-muted">Mencionada em</h3>
-        {back.data?.length ? (
-          <ul className="space-y-1">
-            {back.data.map((b) => (
-              <li key={b.noteId}>
-                <Link to={`/notes/${b.noteId}`} className="block truncate rounded-lg px-1.5 py-1 text-sm hover:bg-surface-2">
-                  {b.title || 'Sem título'}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-muted">Nenhuma outra nota aponta para esta. Use o link interno (Ctrl+Shift+K) em outra nota.</p>
-        )}
+        <BacklinkList items={back.data} empty="Nenhuma outra nota cita esta. Em outra nota, digite / e o título desta." />
       </div>
     </div>
+  );
+}
+
+/** Header of a book review or page annotation: the book it belongs to. */
+function BookContext({ note }: { note: Note }) {
+  const book = useQuery({ queryKey: qk.reading(note.readingId!), queryFn: () => endpoints.readings.get(note.readingId!) });
+  const title = book.data?.title ?? '…';
+  return (
+    <Link
+      to={referencePath({ type: 'note', id: note.id, role: note.role, readingId: note.readingId, page: note.page })}
+      className="inline-flex min-w-0 items-center gap-1.5 text-[13px] text-muted hover:text-accent"
+    >
+      <BookOpen className="size-3.5 shrink-0 text-reading" aria-hidden />
+      <span className="truncate">
+        {note.role === 'review' ? `Resenha de ${title}` : `Anotação de ${title}${note.page ? `, p. ${note.page}` : ''}`}
+        {note.annotationType ? ` · ${ANNOTATION_TYPE_LABELS[note.annotationType]}` : ''}
+      </span>
+    </Link>
   );
 }
 
@@ -250,13 +311,16 @@ export function Component() {
     setConflict(null);
   }, [id]);
   // Only start from a copy fetched now (the persisted cache may be outdated),
-  // except when offline, where the cached copy is the best available.
-  const fresh = noteQuery.isFetchedAfterMount || (!!note && (noteQuery.isError || !navigator.onLine));
+  // except when offline, where the cached copy is the best available, or
+  // right after creating the note, when the cache holds the server response.
+  const justCreated = justCreatedNotes.has(id) && note?.version === 1;
+  const fresh = noteQuery.isFetchedAfterMount || justCreated || (!!note && (noteQuery.isError || !navigator.onLine));
   useEffect(() => {
     if (!note || initial || !fresh) return;
     let cancelled = false;
     void notesSync.getDraft(id).then(async (draft: NoteDraft | undefined) => {
       if (cancelled) return;
+      justCreatedNotes.delete(id);
       if (!draft) {
         setInitial({ title: note.title, content: note.content, restored: false });
         return;
@@ -381,7 +445,9 @@ export function Component() {
       <div className="min-w-0 flex-1 px-4 sm:px-6 lg:px-8">
         <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 pt-3">
           <div className="flex min-w-0 items-center gap-2">
-            {note.topicId ? (
+            {note.role !== 'note' && note.readingId ? (
+              <BookContext note={note} />
+            ) : note.topicId ? (
               <TopicBreadcrumb topicId={note.topicId} />
             ) : (
               <span className="text-[13px] text-subtle">Sem assunto</span>
@@ -445,6 +511,7 @@ export function Component() {
             initialContent={initial.content}
             getBaseVersion={getBaseVersion}
             autoFocusTitle={!!(location.state as { focusTitle?: boolean } | null)?.focusTitle}
+            topicId={note.topicId}
           />
         ) : (
           <PageLoader />

@@ -2,14 +2,16 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { useQuery } from '@tanstack/react-query';
 import { Dialog as RDialog } from 'radix-ui';
 import { useNavigate } from 'react-router';
-import { ArrowLeft, BookOpen, CalendarDays, FileText, LibraryBig, Network, Plus, Search, Settings, StickyNote, Waypoints } from 'lucide-react';
+import { ArrowLeft, FileText, Hash, LibraryBig, Network, Plus, Search, Settings, StickyNote, Waypoints } from 'lucide-react';
 import type { SearchResult } from '@mynotes/shared';
 import { Kbd, Spinner } from '@/components/ui/feedback';
 import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
 import { EntityIcon, entityLabel, entityPath } from '@/lib/entities';
 import { qk } from '@/lib/query';
+import { referencePath } from '@/lib/references';
 import { useCreateNote } from '@/features/notes/use-create-note';
+import { useCurrentTopic } from '@/features/topics/use-current-topic';
 import { useDebounced } from '@/lib/hooks';
 
 interface Action {
@@ -49,6 +51,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
 function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const navigate = useNavigate();
   const createNote = useCreateNote();
+  const topic = useCurrentTopic();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const debounced = useDebounced(query.trim(), 200);
@@ -74,13 +77,18 @@ function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (
   };
 
   const actions: Action[] = [
-    { id: 'new-note', label: 'Nova nota', icon: <Plus />, run: () => (onOpenChange(false), createNote.mutate(null)), hint: 'Alt+N' },
+    {
+      id: 'new-note',
+      label: topic ? `Nova nota em “${topic.title}”` : 'Nova nota',
+      icon: <Plus />,
+      run: () => (onOpenChange(false), createNote.mutate(topic?.id ?? null)),
+      hint: 'Alt+N',
+    },
     { id: 'notes', label: 'Ir para Notas', icon: <StickyNote />, run: () => go('/notes') },
-    { id: 'library', label: 'Ir para Biblioteca', icon: <LibraryBig />, run: () => go('/library') },
-    { id: 'readings', label: 'Ir para Leituras', icon: <BookOpen />, run: () => go('/readings') },
-    { id: 'study', label: 'Ir para Estudos', icon: <CalendarDays />, run: () => go('/study') },
-    { id: 'maps', label: 'Ir para Mapas mentais', icon: <Network />, run: () => go('/maps') },
+    { id: 'library', label: 'Ir para Biblioteca (livros e documentos)', icon: <LibraryBig />, run: () => go('/library') },
     { id: 'graph', label: 'Ir para Grafo', icon: <Waypoints />, run: () => go('/graph') },
+    ...(topic ? [{ id: 'topic-map', label: `Mapa mental de “${topic.title}”`, icon: <Network />, run: () => go(`/topics/${topic.id}/map`) }] : []),
+    { id: 'tags', label: 'Ver tags', icon: <Hash />, run: () => go('/search?tags=1') },
     { id: 'settings', label: 'Configurações', icon: <Settings />, run: () => go('/settings') },
   ];
 
@@ -92,7 +100,14 @@ function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (
       ]
     : actions.filter((a) => !query || a.label.toLowerCase().includes(query.toLowerCase()));
 
-  const runItem = (item: Action | SearchResult) => ('run' in item ? item.run() : go(entityPath(item.type, item.id)));
+  const runItem = (item: Action | SearchResult) =>
+    'run' in item
+      ? item.run()
+      : go(
+          item.type === 'note'
+            ? referencePath({ type: 'note', id: item.id, role: item.role ?? 'note', readingId: item.readingId ?? null, page: item.page ?? null })
+            : entityPath(item.type, item.id),
+        );
 
   useEffect(() => setActive(0), [debounced, results.data]);
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { all, stmt } from './lib/db';
 import { isoBefore, nowIso } from './lib/time';
+import { reindexNotes } from './modules/notes/service';
 
 /**
  * Daily housekeeping (cron trigger). Removes expired authentication data,
@@ -31,4 +32,7 @@ export async function runMaintenance(env: Env): Promise<void> {
     stmt(db, 'DELETE FROM activity_events WHERE occurred_at < ?', isoBefore(400 * 86400)),
     ...stale.map((d) => stmt(db, 'DELETE FROM documents WHERE id = ? AND uploaded_at IS NULL', d.id)),
   ]);
+
+  // Derived note indexes (#tags) for notes saved before they existed.
+  await reindexNotes(db, null, 500);
 }

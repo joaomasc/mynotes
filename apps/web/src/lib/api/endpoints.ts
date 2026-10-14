@@ -37,6 +37,7 @@ import type {
   ReadingUpdate,
   RelationCreate,
   RelationUpdate,
+  Reference,
   RelationWithTitles,
   SearchResult,
   Session,
@@ -46,7 +47,9 @@ import type {
   StudySessionCreate,
   StudySessionUpdate,
   StudyStats,
+  TagCount,
   Topic,
+  TopicContext,
   TopicCreate,
   TopicDetail,
   TopicMove,
@@ -55,6 +58,8 @@ import type {
   TrashItem,
   UpcomingGoal,
   User,
+  ViewLayout,
+  ViewLayoutData,
 } from '@mynotes/shared';
 import { api } from './client';
 
@@ -75,10 +80,11 @@ export const endpoints = {
     move: (id: string, body: TopicMove) => api.post<Topic>(`/topics/${id}/move`, body),
     remove: (id: string, mode: 'trash_all' | 'move_to_parent') =>
       api.del<{ batchId: string; affected: number }>(`/topics/${id}`, { mode }),
+    context: (id: string) => api.get<TopicContext>(`/topics/${id}/context`),
   },
 
   notes: {
-    list: (q: { topicId?: string; sort?: string; cursor?: string; limit?: number }) =>
+    list: (q: { topicId?: string; sort?: string; role?: string; readingId?: string; tag?: string; cursor?: string; limit?: number }) =>
       api.page<NoteSummary>('/notes', q),
     get: (id: string, signal?: AbortSignal) => api.get<Note>(`/notes/${id}`, undefined, signal),
     create: (body: NoteCreate) => api.post<Note>('/notes', body),
@@ -89,6 +95,21 @@ export const endpoints = {
     revisions: (id: string) => api.get<NoteRevisionSummary[]>(`/notes/${id}/revisions`),
     revision: (id: string, revisionId: string) => api.get<NoteRevision>(`/notes/${id}/revisions/${revisionId}`),
     backlinks: (type: string, id: string) => api.get<Backlink[]>(`/backlinks/${type}/${id}`),
+  },
+
+  tags: (q?: string, limit = 50, signal?: AbortSignal) => api.get<TagCount[]>('/tags', { q, limit }, signal),
+
+  references: {
+    suggest: (q: string, types?: string, limit = 12, signal?: AbortSignal) =>
+      api.get<Reference[]>('/references/suggest', { q, types, limit }, signal),
+    /** `refs`: `type:id` pairs. */
+    resolve: (refs: string[]) => api.get<Reference[]>('/references/resolve', { refs: refs.join(',') }),
+  },
+
+  layouts: {
+    get: (key: string) => api.get<ViewLayout | null>(`/layouts/${key}`),
+    put: (key: string, data: ViewLayoutData, baseVersion?: number) =>
+      api.put<ViewLayout>(`/layouts/${key}`, { data, ...(baseVersion ? { baseVersion } : {}) }, { retries: 0, track: false }),
   },
 
   documents: {

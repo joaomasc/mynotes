@@ -51,6 +51,9 @@ export function invalidateTopicData(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ['topic'] });
   void qc.invalidateQueries({ queryKey: qk.dashboard });
   void qc.invalidateQueries({ queryKey: ['graph'] });
+  // References show the current title of topics.
+  void qc.invalidateQueries({ queryKey: ['reference'] });
+  void qc.invalidateQueries({ queryKey: ['topic-context'] });
 }
 
 export function TopicFormDialog({
@@ -71,6 +74,8 @@ export function TopicFormDialog({
   const [description, setDescription] = useState('');
   const [color, setColor] = useState<string | null>(null);
   const [parent, setParent] = useState<string | null>(null);
+  // Creating only needs a title; description and color stay one click away.
+  const [more, setMore] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -78,6 +83,7 @@ export function TopicFormDialog({
     setDescription(topic?.description ?? '');
     setColor(topic?.color ?? null);
     setParent(topic ? topic.parentId : (parentId ?? null));
+    setMore(!!topic);
   }, [open, topic, parentId]);
 
   const mutation = useMutation({
@@ -133,40 +139,48 @@ export function TopicFormDialog({
           )}
         </Field>
         {!topic && (
-          <Field label="Dentro de">
+          <Field label="Dentro de" hint={parent ? undefined : 'Na raiz, o assunto funciona como um caderno.'}>
             {(p) => <TopicSelect {...p} value={parent} onChange={setParent} />}
           </Field>
         )}
-        <Field label="Descrição" optional>
-          {(p) => <Textarea {...p} value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />}
-        </Field>
-        <fieldset>
-          <legend className="mb-1.5 text-[13px] font-medium">Cor</legend>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setColor(null)}
-              aria-pressed={color === null}
-              className={cn(
-                'h-8 rounded-full border border-border px-3 text-xs text-muted',
-                color === null && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
-              )}
-            >
-              Padrão
-            </button>
-            {TOPIC_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setColor(c)}
-                aria-label={`Cor ${c}`}
-                aria-pressed={color === c}
-                className={cn('size-8 rounded-full', color === c && 'ring-2 ring-accent ring-offset-2 ring-offset-surface')}
-                style={{ background: c }}
-              />
-            ))}
-          </div>
-        </fieldset>
+        {!more ? (
+          <button type="button" onClick={() => setMore(true)} className="text-[13px] font-medium text-accent hover:underline">
+            Mais opções (descrição e cor)
+          </button>
+        ) : (
+          <>
+            <Field label="Descrição" optional>
+              {(p) => <Textarea {...p} value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />}
+            </Field>
+            <fieldset>
+              <legend className="mb-1.5 text-[13px] font-medium">Cor</legend>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setColor(null)}
+                  aria-pressed={color === null}
+                  className={cn(
+                    'h-8 rounded-full border border-border px-3 text-xs text-muted',
+                    color === null && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
+                  )}
+                >
+                  Padrão
+                </button>
+                {TOPIC_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setColor(c)}
+                    aria-label={`Cor ${c}`}
+                    aria-pressed={color === c}
+                    className={cn('size-8 rounded-full', color === c && 'ring-2 ring-accent ring-offset-2 ring-offset-surface')}
+                    style={{ background: c }}
+                  />
+                ))}
+              </div>
+            </fieldset>
+          </>
+        )}
       </form>
     </Dialog>
   );

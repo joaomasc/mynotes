@@ -21,6 +21,10 @@ onLogout(async () => {
 // (version AND content), or a later reload could start from stale content.
 notesSync.onSaved = (summary, saved) => {
   void queryClient.invalidateQueries({ queryKey: ['notes'] });
+  // References, tags and backlinks are derived from the saved content.
+  for (const key of [['backlinks'], ['tags'], ['topic-context'], ['reference', 'note', summary.id]]) {
+    void queryClient.invalidateQueries({ queryKey: key });
+  }
   queryClient.setQueryData(['note', summary.id], (prev: object | undefined) =>
     prev ? { ...prev, ...summary, title: saved.title, content: saved.content } : prev,
   );
@@ -33,7 +37,18 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <PersistQueryClientProvider
       client={queryClient}
-      persistOptions={{ persister: queryPersister, buster: PERSIST_BUSTER, maxAge: 7 * 24 * 3600_000 }}
+      // The restored cache is shown at once (and offline) but may predate the
+      // last changes (writes are throttled): refetch whatever is on screen.
+      onSuccess={() => void queryClient.invalidateQueries()}
+      persistOptions={{
+        persister: queryPersister,
+        buster: PERSIST_BUSTER,
+        maxAge: 7 * 24 * 3600_000,
+        dehydrateOptions: {
+          // Titles shown by references must be current (renames): never restored from disk.
+          shouldDehydrateQuery: (q) => q.state.status === 'success' && !String(q.queryKey[0]).startsWith('reference'),
+        },
+      }}
     >
       <ConfirmProvider>
         <RouterProvider router={router} />

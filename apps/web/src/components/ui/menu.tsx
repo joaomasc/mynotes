@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { cn } from '@/lib/cn';
 
@@ -25,8 +25,12 @@ export function Menu({
   align?: 'start' | 'end' | 'center';
   label?: string;
 }) {
+  // After an item runs, focus belongs to whatever it opened (a new page, a
+  // dialog, an editor). Returning it to the trigger would steal it: e.g. the
+  // title of a note created from the sidebar "+" lost focus and typing was lost.
+  const selected = useRef(false);
   return (
-    <DropdownMenu.Root modal={false}>
+    <DropdownMenu.Root modal={false} onOpenChange={(open) => open && (selected.current = false)}>
       <DropdownMenu.Trigger asChild aria-label={label}>
         {trigger}
       </DropdownMenu.Trigger>
@@ -35,6 +39,7 @@ export function Menu({
           align={align}
           sideOffset={6}
           collisionPadding={8}
+          onCloseAutoFocus={(e) => selected.current && e.preventDefault()}
           className="z-50 min-w-[200px] rounded-xl border border-border bg-surface p-1 shadow-pop"
         >
           {items.map((item, i) =>
@@ -44,7 +49,10 @@ export function Menu({
               <DropdownMenu.Item
                 key={item.label}
                 disabled={item.disabled}
-                onSelect={item.onSelect}
+                onSelect={() => {
+                  selected.current = true;
+                  item.onSelect();
+                }}
                 className={cn(
                   'flex min-h-9 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-sm outline-none select-none',
                   'data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-surface-2',

@@ -3,6 +3,9 @@ import { PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX } from '../constants';
 import { UUID_RE } from '../ids';
 import type { RichTextDoc, RichTextNode } from '../text';
 
+// Validation messages reach the user (API errors, forms): keep them in Portuguese.
+z.config(z.locales.ptBR());
+
 export const zId = z.string().regex(UUID_RE, 'Identificador inválido');
 export const zDateTime = z.iso.datetime({ offset: false });
 export const zDate = z.iso.date();
@@ -61,7 +64,10 @@ function isRichTextNode(value: unknown, depth: number): value is RichTextNode {
 export const zRichTextDoc = z
   .looseObject({
     type: z.literal('doc'),
-    content: z.array(z.looseObject({ type: z.string() })),
+    // ProseMirror omits `content` when a node has no children, so an empty
+    // document serializes as `{ "type": "doc" }` (e.g. a new note whose title
+    // was typed before its body). Normalized to an empty array.
+    content: z.array(z.looseObject({ type: z.string() })).default([]),
   })
   .refine((value) => isRichTextNode(value, 0), { message: 'Documento de texto inválido' }) as unknown as z.ZodType<
   RichTextDoc,

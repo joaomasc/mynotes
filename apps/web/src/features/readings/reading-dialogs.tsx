@@ -46,6 +46,8 @@ export function invalidateReadings(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ['reading'] });
   void qc.invalidateQueries({ queryKey: qk.dashboard });
   void qc.invalidateQueries({ queryKey: qk.topics });
+  void qc.invalidateQueries({ queryKey: ['reference'] });
+  void qc.invalidateQueries({ queryKey: ['topic-context'] });
 }
 
 const num = (v: string): number | null => (v.trim() === '' ? null : Number.parseInt(v, 10));

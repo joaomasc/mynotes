@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   BACKUP_TABLE_ORDER,
@@ -103,14 +103,20 @@ describe('mind map schema', () => {
 });
 
 describe('backup format', () => {
-  it('only uses columns that exist in the database schema', () => {
-    const sql = readFileSync(new URL('../../../apps/api/migrations/0001_initial.sql', import.meta.url), 'utf8');
+  it('only uses columns that exist in the database schema (all migrations)', () => {
+    const dir = new URL('../../../apps/api/migrations/', import.meta.url);
+    const sql = readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .map((f) => readFileSync(new URL(f, dir), 'utf8'))
+      .join('\n');
     for (const table of BACKUP_TABLE_ORDER) {
       const match = new RegExp(`CREATE TABLE ${table} \\(([\\s\\S]*?)\\n\\);`).exec(sql);
       expect(match, `table ${table} exists`).not.toBeNull();
+      const added = [...sql.matchAll(new RegExp(`ALTER TABLE ${table} ADD COLUMN (\\w+)`, 'g'))].map((m) => m[1]);
       const body = match![1]!;
       for (const col of backupColumns(table)) {
-        expect(new RegExp(`^\\s+${col}\\s`, 'm').test(body), `${table}.${col}`).toBe(true);
+        expect(new RegExp(`^\\s+${col}\\s`, 'm').test(body) || added.includes(col), `${table}.${col}`).toBe(true);
       }
     }
   });

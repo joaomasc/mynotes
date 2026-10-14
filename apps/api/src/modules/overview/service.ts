@@ -13,6 +13,7 @@ import {
   type GraphEdge,
   type GraphEntityType,
   type GraphNode,
+  type NoteRole,
   type SearchEntityType,
   type SearchResult,
   type Setting,
@@ -24,7 +25,7 @@ import { assertEntity, entityKey, resolveEntities } from '../../lib/entities';
 import { SUBTREE_SQL, activityStmt } from '../../lib/helpers';
 import { encodeCursor, decodeCursor } from '../../lib/pagination';
 import { isoBefore, nowIso } from '../../lib/time';
-import { toNoteSummary } from '../notes/service';
+import { NOTE_SUMMARY_COLS, toNoteSummary } from '../notes/service';
 import { upcomingGoals } from '../plans/service';
 import { toReading } from '../readings/service';
 import { hydrateSessions } from '../study/service';
@@ -54,12 +55,20 @@ export async function buildGraph(
   // Hierarchy is always needed to scope by topic and draw structural edges.
   const statements = types.map((type) => {
     const src = GRAPH_SOURCES[type];
-    let sql = `SELECT id, ${src.title} AS title, ${src.topic} AS topic_id FROM ${src.table} WHERE user_id = ?`;
+    const extra = type === 'note' ? ', role, reading_id, page' : '';
+    let sql = `SELECT id, ${src.title} AS title, ${src.topic} AS topic_id${extra} FROM ${src.table} WHERE user_id = ?`;
     const binds: Bindable[] = [userId];
     if (src.trashable) sql += ' AND deleted_at IS NULL';
     if (q.topicId) {
-      sql += ` AND ${type === 'topic' ? 'id' : 'topic_id'} IN (${SUBTREE_SQL})`;
-      binds.push(q.topicId, userId);
+      const column = type === 'topic' ? 'id' : 'topic_id';
+      if (type === 'note') {
+        // Reviews and annotations belong to a book: in scope when their book is.
+        sql += ` AND (topic_id IN (${SUBTREE_SQL}) OR reading_id IN (SELECT id FROM readings WHERE topic_id IN (${SUBTREE_SQL})))`;
+        binds.push(q.topicId, userId, q.topicId, userId);
+      } else {
+        sql += ` AND ${column} IN (${SUBTREE_SQL})`;
+        binds.push(q.topicId, userId);
+      }
     }
     sql += ' ORDER BY updated_at DESC LIMIT ?';
     binds.push(GRAPH_LIMIT_PER_TYPE + 1);
@@ -77,19 +86,24 @@ export async function buildGraph(
   const results = await db.batch<Row>(statements);
 
   const nodes = new Map<string, GraphNode>();
+  const annotates: { note: string; reading: string }[] = [];
   let truncated = false;
   types.forEach((type, i) => {
     const rows = results[i]?.results ?? [];
     if (rows.length > GRAPH_LIMIT_PER_TYPE) truncated = true;
     for (const r of rows.slice(0, GRAPH_LIMIT_PER_TYPE)) {
       const key = entityKey(type, str(r.id));
+      const role = type === 'note' ? ((strOrNull(r.role) ?? 'note') as NoteRole) : null;
+      const fallback = role === 'review' ? 'Resenha' : role === 'annotation' ? (r.page ? `p. ${num(r.page)}` : 'Anotação') : 'Sem título';
       nodes.set(key, {
         key,
         type,
         entityId: str(r.id),
-        label: str(r.title) || 'Sem título',
+        label: str(r.title) || fallback,
         topicId: strOrNull(r.topic_id),
+        role,
       });
+      if (role && role !== 'note' && r.reading_id) annotates.push({ note: key, reading: entityKey('reading', str(r.reading_id)) });
     }
   });
 
@@ -121,6 +135,9 @@ export async function buildGraph(
       relationId: str(r.id),
       label: str(r.label),
     });
+  }
+  for (const a of annotates) {
+    addEdge({ source: a.note, target: a.reading, kind: 'annotates', relationId: null, label: '' });
   }
   for (const l of results[types.length + 1]?.results ?? []) {
     addEdge({
@@ -352,6 +369,8 @@ interface SearchSource {
   snippet: string;
   topic: string;
   trashable: boolean;
+  /** Extra columns returned as-is. */
+  extra?: string;
 }
 
 /**
@@ -368,6 +387,7 @@ const SEARCH_SOURCES: Record<SearchEntityType, SearchSource> = {
                 ELSE substr(body_text, 1, 200) END`,
     topic: 'topic_id',
     trashable: true,
+    extra: ', role, reading_id, page',
   },
   topic: { table: 'topics', title: 'title', snippet: 'substr(description, 1, 200)', topic: 'parent_id', trashable: true },
   document: {
@@ -407,7 +427,7 @@ export async function search(
     const where = terms.map(() => 'instr(search_text, ?) > 0').join(' AND ');
     return stmt(
       db,
-      `SELECT id, ${s.title} AS title, ${s.snippet} AS snippet, ${s.topic} AS topic_id, updated_at,
+      `SELECT id, ${s.title} AS title, ${s.snippet} AS snippet, ${s.topic} AS topic_id, updated_at${s.extra ?? ''},
               CASE WHEN instr(substr(search_text, 1, length(${s.title})), ?) > 0 THEN 0 ELSE 1 END AS rank
          FROM ${s.table}
         WHERE user_id = ?${s.trashable ? ' AND deleted_at IS NULL' : ''} AND ${where}
@@ -426,15 +446,25 @@ export async function search(
       result: {
         type,
         id: str(r.id),
-        title: str(r.title) || 'Sem título',
+        title: str(r.title) || (r.role === 'review' ? 'Resenha' : r.role === 'annotation' ? 'Anotação' : 'Sem título'),
         snippet: str(r.snippet).replace(/\s+/g, ' ').trim(),
         topicId: strOrNull(r.topic_id),
         updatedAt: str(r.updated_at),
-      } satisfies SearchResult,
+        ...(type === 'note'
+          ? { role: (strOrNull(r.role) ?? 'note') as NoteRole, readingId: strOrNull(r.reading_id), page: r.page == null ? null : num(r.page) }
+          : {}),
+      } as SearchResult,
     })),
   );
   merged.sort((a, b) => a.rank - b.rank || b.result.updatedAt.localeCompare(a.result.updatedAt));
-  return merged.slice(0, q.limit).map((m) => m.result);
+  const top = merged.slice(0, q.limit).map((m) => m.result);
+  // Reviews and annotations are shown with the title of their book.
+  const books = await resolveEntities(
+    db,
+    userId,
+    top.flatMap((r) => (r.readingId ? [{ type: 'reading' as const, id: r.readingId }] : [])),
+  );
+  return top.map((r) => (r.readingId ? { ...r, readingTitle: books.get(entityKey('reading', r.readingId))?.title ?? null } : r));
 }
 
 /* -------------------------------------------------------------- dashboard */
@@ -444,8 +474,7 @@ export async function dashboard(db: D1Database, userId: string): Promise<Dashboa
   const [recentNotes, inProgress, overdue, totals, recentSessions] = await db.batch<Row>([
     stmt(
       db,
-      `SELECT id, topic_id, title, excerpt, word_count, sort_key, version, created_at, updated_at FROM notes
-        WHERE user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 6`,
+      `SELECT ${NOTE_SUMMARY_COLS} FROM notes WHERE user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 6`,
       userId,
     ),
     stmt(db, "SELECT * FROM readings WHERE user_id = ? AND status = 'in_progress' ORDER BY updated_at DESC LIMIT 6", userId),

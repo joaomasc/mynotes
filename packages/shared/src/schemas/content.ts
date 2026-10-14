@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import {
+  ANNOTATION_TYPES,
   DESCRIPTION_MAX,
   MATERIAL_TYPES,
+  NOTE_ROLES,
   NOTE_TITLE_MAX,
   PLAN_STATUSES,
   READING_STATUSES,
@@ -86,6 +88,10 @@ export type TopicDetail = z.infer<typeof zTopicDetail>;
 
 /* ------------------------------------------------------------------ Notes */
 
+export const zNoteRole = z.enum(NOTE_ROLES);
+export const zAnnotationType = z.enum(ANNOTATION_TYPES);
+const zPage = z.number().int().min(1).max(100_000);
+
 export const zNoteSummary = z.object({
   id: zId,
   topicId: zId.nullable(),
@@ -93,6 +99,13 @@ export const zNoteSummary = z.object({
   excerpt: z.string(),
   wordCount: z.number().int(),
   sortKey: z.string(),
+  /** note, or the review / a page annotation of `readingId`. */
+  role: zNoteRole,
+  readingId: zId.nullable(),
+  page: z.number().int().nullable(),
+  annotationType: zAnnotationType.nullable(),
+  /** Passage the annotation refers to. */
+  quote: z.string(),
   ...zTimestamps,
 });
 export type NoteSummary = z.infer<typeof zNoteSummary>;
@@ -106,8 +119,18 @@ export const zNoteCreate = z
     topicId: zId.nullable().default(null),
     title: zTrimmed(NOTE_TITLE_MAX).default(''),
     content: zRichTextDoc.optional(),
+    role: zNoteRole.default('note'),
+    /** Required for reviews and annotations. */
+    readingId: zId.nullable().default(null),
+    page: zPage.nullable().default(null),
+    annotationType: zAnnotationType.nullable().default(null),
+    quote: zTrimmed(DESCRIPTION_MAX).default(''),
   })
-  .extend(zPosition.shape);
+  .extend(zPosition.shape)
+  .refine((v) => v.role === 'note' || v.readingId !== null, {
+    message: 'Resenhas e anotações precisam de um livro',
+    path: ['readingId'],
+  });
 export type NoteCreate = z.input<typeof zNoteCreate>;
 
 export const zNoteUpdate = z.object({
@@ -115,6 +138,9 @@ export const zNoteUpdate = z.object({
   title: zTrimmed(NOTE_TITLE_MAX).optional(),
   content: zRichTextDoc.optional(),
   topicId: zId.nullable().optional(),
+  page: zPage.nullable().optional(),
+  annotationType: zAnnotationType.nullable().optional(),
+  quote: zTrimmed(DESCRIPTION_MAX).optional(),
 });
 export type NoteUpdate = z.input<typeof zNoteUpdate>;
 
@@ -126,6 +152,11 @@ export const NOTE_SORTS = ['manual', 'updated', 'created', 'title'] as const;
 export const zNoteListQuery = z.object({
   topicId: z.union([zId, z.literal('none')]).optional(),
   sort: z.enum(NOTE_SORTS).default('updated'),
+  /** Default: every role. */
+  role: zNoteRole.optional(),
+  readingId: zId.optional(),
+  /** Notes carrying this #tag (normalized server-side). */
+  tag: z.string().trim().min(1).max(60).optional(),
 });
 
 export const zNoteRevisionSummary = z.object({
@@ -144,8 +175,17 @@ export const zBacklink = z.object({
   noteId: zId,
   title: z.string(),
   topicId: zId.nullable(),
+  role: zNoteRole,
+  readingId: zId.nullable(),
+  /** Title of the book, for reviews and annotations. */
+  readingTitle: z.string().nullable(),
+  page: z.number().int().nullable(),
+  excerpt: z.string(),
   updatedAt: zDateTime,
 });
+
+export const zTagCount = z.object({ tag: z.string(), count: z.number().int() });
+export type TagCount = z.infer<typeof zTagCount>;
 export type Backlink = z.infer<typeof zBacklink>;
 
 /* -------------------------------------------------------------- Documents */

@@ -15,13 +15,21 @@ export function Component() {
   const [params, setParams] = useSearchParams();
   const topicId = params.get('topic') ?? '';
   const sort = params.get('sort') ?? 'updated';
+  // Reviews and page annotations live in their books; listed here on demand.
+  const role = params.get('role') ?? 'note';
   const createNote = useCreateNote();
   const { tree } = useTopics();
 
   const query = useInfiniteQuery({
-    queryKey: qk.notes({ topicId, sort, infinite: true }),
+    queryKey: qk.notes({ topicId, sort, role, infinite: true }),
     queryFn: ({ pageParam }) =>
-      endpoints.notes.list({ ...(topicId ? { topicId } : {}), sort, limit: 50, ...(pageParam ? { cursor: pageParam } : {}) }),
+      endpoints.notes.list({
+        ...(topicId ? { topicId } : {}),
+        ...(role !== 'all' ? { role } : {}),
+        sort,
+        limit: 50,
+        ...(pageParam ? { cursor: pageParam } : {}),
+      }),
     initialPageParam: '' as string,
     getNextPageParam: (last) => last.meta.nextCursor ?? undefined,
   });
@@ -60,6 +68,14 @@ export function Component() {
                 {t.title}
               </option>
             ))}
+          </Select>
+        </div>
+        <div className="w-48">
+          <Select aria-label="Tipo de nota" value={role} onChange={(e) => update('role', e.target.value === 'note' ? '' : e.target.value)}>
+            <option value="note">Notas</option>
+            <option value="annotation">Anotações de leitura</option>
+            <option value="review">Resenhas</option>
+            <option value="all">Tudo</option>
           </Select>
         </div>
         <div className="w-44">

@@ -89,3 +89,28 @@ test('detects a concurrent edit from another device and keeps the chosen version
   const final = await (await request.get(`${API}/notes/${id}`, { headers })).json();
   expect(JSON.stringify(final.data.content)).toContain('Editado no notebook.');
 });
+
+test('sidebar "+" creates a note with the title focused and follows the current topic', async ({ page }) => {
+  const sidebar = page.getByRole('complementary', { name: 'Barra lateral' });
+  // At the root: a note without topic; typing right away goes to the title.
+  await sidebar.getByRole('button', { name: 'Criar' }).click();
+  await page.getByRole('menuitem', { name: 'Nova nota' }).click();
+  await page.waitForURL(/\/notes\/[0-9a-f-]{36}$/);
+  const id = page.url().split('/notes/')[1]!;
+  await expect(page.getByLabel('Título da nota')).toBeFocused();
+  await page.keyboard.type('Criada pela barra lateral');
+  await page.waitForResponse((r) => r.url().endsWith(`/notes/${id}`) && r.request().method() === 'PATCH' && r.ok());
+  await page.reload();
+  await expect(page.getByLabel('Título da nota')).toHaveValue('Criada pela barra lateral');
+  await expect(page.getByText('Sem assunto')).toBeVisible();
+
+  // Inside a topic: the "+" offers to create the note there.
+  await sidebar.getByRole('button', { name: 'Novo assunto' }).click();
+  await page.getByRole('dialog').getByLabel('Título', { exact: true }).fill('Contexto E2E');
+  await page.getByRole('button', { name: 'Criar' }).click();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Contexto E2E');
+  await sidebar.getByRole('button', { name: 'Criar' }).click();
+  await page.getByRole('menuitem', { name: 'Nota em “Contexto E2E”' }).click();
+  await page.waitForURL(/\/notes\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole('navigation', { name: 'Caminho' })).toContainText('Contexto E2E');
+});

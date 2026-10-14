@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Editor } from '@tiptap/react';
 import { internalHref, isAllowedHref, type InternalLinkType, type SearchResult } from '@mynotes/shared';
+import { insertReference } from './reference-menu';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input } from '@/components/ui/form';
@@ -83,23 +84,23 @@ export function InternalLinkDialog({
   currentNoteId: string;
 }) {
   const pick = (item: SearchResult) => {
-    const href = internalHref(item.type as InternalLinkType, item.id);
-    if (editor.state.selection.empty) {
-      editor
-        .chain()
-        .focus()
-        .insertContent([
-          { type: 'text', text: item.title, marks: [{ type: 'link', attrs: { href } }] },
-          { type: 'text', text: ' ' },
-        ])
-        .run();
+    const { from, to, empty } = editor.state.selection;
+    if (empty) {
+      // Same reference node as "/": stored by id, shows the current title.
+      insertReference(
+        editor,
+        { from, to },
+        { type: item.type as InternalLinkType, id: item.id, title: item.title, role: item.role ?? null, readingTitle: item.readingTitle ?? null, page: item.page ?? null },
+        null,
+      );
     } else {
-      editor.chain().focus().setLink({ href }).run();
+      // Selected text becomes a link to the item.
+      editor.chain().focus().setLink({ href: internalHref(item.type as InternalLinkType, item.id) }).run();
     }
     onOpenChange(false);
   };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Link interno" description="Conecte esta nota a outro item do MyNotes.">
+    <Dialog open={open} onOpenChange={onOpenChange} title="Referenciar item" description="Dica: no texto, digite / para referenciar sem sair do teclado.">
       <EntityPicker
         types={['note', 'topic', 'document', 'reading', 'concept']}
         onPick={pick}

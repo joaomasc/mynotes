@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { BookOpen, Plus, Search } from 'lucide-react';
 import { MATERIAL_TYPE_LABELS, PRIORITY_LABELS, READING_STATUS_LABELS, type Reading } from '@mynotes/shared';
 import { Button } from '@/components/ui/button';
@@ -60,18 +60,29 @@ function ReadingCard({ r, onProgress }: { r: Reading; onProgress: () => void }) 
   );
 }
 
+/** `/readings` is now part of the library (old links keep working). */
 export function Component() {
+  const { search } = useLocation();
+  return <Navigate to={`/library${search}`} replace />;
+}
+
+/** Books and readings of the library; each opens its study space. */
+export function ReadingsView({ switcher }: { switcher: ReactNode }) {
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'in_progress';
+  const tab = (params.get('tab') as Tab) || 'all';
   const sort = params.get('sort') ?? 'updated';
   const [q, setQ] = useState('');
   const query = useDebounced(q.trim(), 250);
-  const [form, setForm] = useState<{ open: boolean; defaults?: Record<string, string | null> }>({ open: false });
+  const [form, setForm] = useState<{ open: boolean; defaults?: Parameters<typeof ReadingFormDialog>[0]['defaults'] }>({ open: false });
   const [progressFor, setProgressFor] = useState<Reading | null>(null);
 
   useEffect(() => {
-    if (params.get('new') === '1') {
-      setForm({ open: true, defaults: { topicId: params.get('topicId'), documentId: params.get('documentId') } });
+    if (params.get('new') === '1' || params.get('new') === 'book') {
+      setForm({
+        open: true,
+        defaults: { topicId: params.get('topicId'), documentId: params.get('documentId'), ...(params.get('new') === 'book' ? { materialType: 'book' as const } : {}) },
+      });
       const next = new URLSearchParams(params);
       ['new', 'topicId', 'documentId'].forEach((k) => next.delete(k));
       setParams(next, { replace: true });
@@ -101,31 +112,32 @@ export function Component() {
   return (
     <Page width="wide">
       <PageHeader
-        title="Leituras"
-        subtitle="Livros, artigos e materiais que você está lendo ou quer ler."
+        title="Biblioteca"
+        subtitle="Cada livro tem seu espaço de estudo: PDF, página atual, anotações por página e sua resenha."
         actions={
           <>
             <Link to="/plans" className="inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-muted hover:bg-surface-2 hover:text-text">
               Planos de leitura
             </Link>
-            <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setForm({ open: true })}>
-              Nova leitura
+            <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setForm({ open: true, defaults: { materialType: 'book' } })}>
+              Novo livro
             </Button>
           </>
         }
       />
+      <div className="mb-4">{switcher}</div>
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <div className="max-w-full overflow-x-auto">
           <Segmented
             label="Filtrar por situação"
             value={tab}
-            onChange={(v) => setParam('tab', v === 'in_progress' ? '' : v)}
+            onChange={(v) => setParam('tab', v === 'all' ? '' : v)}
             options={[
+              { value: 'all', label: 'Todas' },
               { value: 'in_progress', label: 'Em andamento' },
               { value: 'not_started', label: 'Não iniciadas' },
               { value: 'overdue', label: 'Atrasadas' },
               { value: 'completed', label: 'Concluídas' },
-              { value: 'all', label: 'Todas' },
             ]}
           />
         </div>
@@ -179,7 +191,12 @@ export function Component() {
         </>
       )}
 
-      <ReadingFormDialog open={form.open} onOpenChange={(o) => setForm({ open: o })} defaults={form.defaults} />
+      <ReadingFormDialog
+        open={form.open}
+        onOpenChange={(o) => setForm({ open: o })}
+        defaults={form.defaults}
+        onSaved={(r) => void navigate(`/readings/${r.id}`)}
+      />
       <ProgressDialog reading={progressFor} open={!!progressFor} onOpenChange={(o) => !o && setProgressFor(null)} />
     </Page>
   );

@@ -1,5 +1,5 @@
-import { memo, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Background,
   Controls,
@@ -8,46 +8,65 @@ import {
   Position,
   ReactFlow,
   ReactFlowProvider,
+  applyNodeChanges,
   useReactFlow,
+  type Connection,
   type Edge,
   type Node,
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from 'd3-force';
-import { Link, useNavigate } from 'react-router';
-import { ExternalLink, Search, Waypoints, X } from 'lucide-react';
-import { GRAPH_ENTITY_TYPES, RELATION_KIND_LABELS, type Graph, type GraphEdge, type GraphEntityType, type GraphNode } from '@mynotes/shared';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { toast } from 'sonner';
+import { ArrowLeft, ArrowRight, ExternalLink, Expand, Link2, RotateCcw, Search, Trash, Waypoints, X } from 'lucide-react';
+import {
+  GRAPH_ENTITY_TYPES,
+  RELATION_KIND_LABELS,
+  normalizeSearch,
+  type Graph,
+  type GraphEdge,
+  type GraphEntityType,
+  type GraphNode,
+  type RelationKind,
+} from '@mynotes/shared';
 import { Button, IconButton } from '@/components/ui/button';
 import { EmptyState, ErrorState, PageLoader } from '@/components/ui/feedback';
 import { Checkbox, Segmented, Select } from '@/components/ui/form';
+import { errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
-import { ENTITY_CSS_VAR, EntityIcon, entityLabel, entityPath } from '@/lib/entities';
-import { normalizeSearch } from '@mynotes/shared';
+import { ENTITY_CSS_VAR, EntityIcon, entityLabel } from '@/lib/entities';
 import { qk } from '@/lib/query';
+import { referencePath } from '@/lib/references';
+import { RelationDialog } from '../shared/relation-dialog';
 import { useTopics } from '../topics/use-topics';
 
-type GNodeData = { label: string; type: GraphEntityType; dim: boolean; hit: boolean; degree: number };
+type GNodeData = { label: string; type: GraphEntityType; reading: boolean; dim: boolean; hit: boolean; connectable: boolean };
 type GNode = Node<GNodeData, 'entity'>;
+
+/** Reviews and page annotations are notes, drawn with the color of books. */
+const colorOf = (n: { type: GraphEntityType; reading: boolean }) => ENTITY_CSS_VAR[n.reading ? 'reading' : n.type];
 
 const EntityNode = memo(function EntityNode({ data, selected }: NodeProps<GNode>) {
   const size = data.type === 'topic' ? 'text-[13px] font-semibold' : 'text-xs';
+  const handle = data.connectable ? '!size-2.5 !border-surface !bg-accent' : '!pointer-events-none !opacity-0';
   return (
     <div
       className={cn(
         'flex max-w-52 items-center gap-1.5 rounded-full border bg-surface px-2.5 py-1 shadow-card transition-opacity',
         size,
+        data.reading && 'border-dashed',
         selected ? 'ring-2 ring-text' : '',
         data.hit && 'ring-2 ring-warning',
         data.dim && 'opacity-25',
       )}
-      style={{ borderColor: ENTITY_CSS_VAR[data.type] }}
+      style={{ borderColor: colorOf(data) }}
     >
-      <Handle type="target" position={Position.Top} className="!pointer-events-none !opacity-0" />
-      <span className="size-2 shrink-0 rounded-full" style={{ background: ENTITY_CSS_VAR[data.type] }} aria-hidden />
+      <Handle type="target" position={Position.Top} className={handle} />
+      <span className="size-2 shrink-0 rounded-full" style={{ background: colorOf(data) }} aria-hidden />
       <span className="truncate">{data.label}</span>
-      <Handle type="source" position={Position.Bottom} className="!pointer-events-none !opacity-0" />
+      <Handle type="source" position={Position.Bottom} className={handle} />
     </div>
   );
 });
@@ -57,10 +76,13 @@ interface SimNode extends SimulationNodeDatum {
   id: string;
 }
 
-/** Deterministic-ish force layout computed once per graph. */
+/** Force layout computed once per set of nodes (presentation only). */
 function layout(graph: { nodes: GraphNode[]; edges: GraphEdge[] }): Map<string, { x: number; y: number }> {
   const nodes: SimNode[] = graph.nodes.map((n, i) => ({ id: n.key, x: Math.cos(i) * i * 6, y: Math.sin(i) * i * 6 }));
-  const links: SimulationLinkDatum<SimNode>[] = graph.edges.map((e) => ({ source: e.source, target: e.target }));
+  const ids = new Set(nodes.map((n) => n.id));
+  const links: SimulationLinkDatum<SimNode>[] = graph.edges
+    .filter((e) => ids.has(e.source) && ids.has(e.target))
+    .map((e) => ({ source: e.source, target: e.target }));
   const sim = forceSimulation(nodes)
     .force('link', forceLink<SimNode, SimulationLinkDatum<SimNode>>(links).id((d) => d.id).distance(90).strength(0.6))
     .force('charge', forceManyBody().strength(-260))
@@ -75,44 +97,67 @@ function layout(graph: { nodes: GraphNode[]; edges: GraphEdge[] }): Map<string, 
   return new Map(nodes.map((n) => [n.id, { x: n.x ?? 0, y: n.y ?? 0 }]));
 }
 
+const EDGE_LABELS: Partial<Record<GraphEdge['kind'], string>> = {
+  parent: 'subassunto',
+  contains: 'contém',
+  links_to: 'cita',
+  annotates: 'anota',
+};
+const edgeLabel = (e: GraphEdge) => EDGE_LABELS[e.kind] ?? RELATION_KIND_LABELS[e.kind as RelationKind] + (e.label ? ` · ${e.label}` : '');
+
 function edgeStyle(e: GraphEdge): Partial<Edge> {
   if (e.kind === 'parent' || e.kind === 'contains') {
     return { style: { stroke: 'var(--border-strong)', strokeWidth: 1, strokeDasharray: '3 4' } };
   }
+  if (e.kind === 'annotates') return { style: { stroke: 'var(--c-reading)', strokeWidth: 1, strokeDasharray: '2 3' } };
   if (e.kind === 'links_to') {
     return { style: { stroke: 'var(--c-note)', strokeWidth: 1.5 }, markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--c-note)' } };
   }
   return {
     style: { stroke: 'var(--accent)', strokeWidth: 2 },
     markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--accent)' },
-    label: RELATION_KIND_LABELS[e.kind as keyof typeof RELATION_KIND_LABELS] + (e.label ? ` · ${e.label}` : ''),
+    label: edgeLabel(e),
     labelStyle: { fontSize: 10, fill: 'var(--text-muted)' },
     labelBgStyle: { fill: 'var(--surface)' },
   };
 }
 
-function GraphView({ graph, structure }: { graph: Graph; structure: boolean }) {
+function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structure: boolean; focus: string | null; hidden: Set<GraphEntityType> }) {
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const flow = useReactFlow();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [focusDepth, setFocusDepth] = useState<'0' | '1' | '2'>('0');
+  const [selected, setSelected] = useState<string | null>(focus);
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
+  // Local view: neighbourhood of these roots (expanded progressively).
+  const [roots, setRoots] = useState<Set<string>>(() => new Set(focus ? [focus] : []));
+  const [depth, setDepth] = useState<'0' | '1' | '2'>(focus ? '1' : '0');
   const [query, setQuery] = useState('');
+  const [connectMode, setConnectMode] = useState(false);
+  const [pair, setPair] = useState<{ source: GraphNode; target: GraphNode } | null>(null);
+  const [layoutSeed, setLayoutSeed] = useState(0);
 
-  const positions = useMemo(() => layout(graph), [graph]);
+  const byKey = useMemo(() => new Map(graph.nodes.map((n) => [n.key, n])), [graph]);
+  const visibleGraph = useMemo(() => {
+    const nodes = graph.nodes.filter((n) => !hidden.has(n.type));
+    const keys = new Set(nodes.map((n) => n.key));
+    const edges = graph.edges.filter((e) => keys.has(e.source) && keys.has(e.target) && (structure || (e.kind !== 'parent' && e.kind !== 'contains')));
+    return { nodes, edges };
+  }, [graph, hidden, structure]);
   const adjacency = useMemo(() => {
     const adj = new Map<string, Set<string>>();
-    for (const e of graph.edges) {
+    for (const e of visibleGraph.edges) {
       adj.set(e.source, (adj.get(e.source) ?? new Set()).add(e.target));
       adj.set(e.target, (adj.get(e.target) ?? new Set()).add(e.source));
     }
     return adj;
-  }, [graph]);
+  }, [visibleGraph]);
 
   const focusSet = useMemo(() => {
-    if (!selected || focusDepth === '0') return null;
-    const set = new Set([selected]);
-    let frontier = [selected];
-    for (let d = 0; d < Number(focusDepth); d++) {
+    const starts = roots.size ? [...roots] : selected ? [selected] : [];
+    if (depth === '0' || starts.length === 0) return null;
+    const set = new Set(starts);
+    let frontier = starts;
+    for (let d = 0; d < Number(depth); d++) {
       const next: string[] = [];
       for (const id of frontier) {
         for (const n of adjacency.get(id) ?? []) {
@@ -124,27 +169,79 @@ function GraphView({ graph, structure }: { graph: Graph; structure: boolean }) {
       frontier = next;
     }
     return set;
-  }, [selected, focusDepth, adjacency]);
+  }, [roots, selected, depth, adjacency]);
+
+  const shownNodes = useMemo(() => visibleGraph.nodes.filter((n) => !focusSet || focusSet.has(n.key)), [visibleGraph, focusSet]);
+  // Layout of what is shown; recomputed on demand ("Reorganizar"). Dragging only moves nodes on screen.
+  const positions = useMemo(
+    () => layout({ nodes: shownNodes, edges: visibleGraph.edges }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- layoutSeed forces a new layout
+    [shownNodes, visibleGraph.edges, layoutSeed],
+  );
 
   const q = normalizeSearch(query);
-  const hits = useMemo(() => (q.length >= 2 ? new Set(graph.nodes.filter((n) => normalizeSearch(n.label).includes(q)).map((n) => n.key)) : null), [graph, q]);
+  const hits = useMemo(() => (q.length >= 2 ? new Set(shownNodes.filter((n) => normalizeSearch(n.label).includes(q)).map((n) => n.key)) : null), [shownNodes, q]);
 
-  const nodes: GNode[] = graph.nodes
-    .filter((n) => !focusSet || focusSet.has(n.key))
-    .map((n) => ({
-      id: n.key,
-      type: 'entity',
-      position: positions.get(n.key) ?? { x: 0, y: 0 },
-      selected: n.key === selected,
-      data: { label: n.label, type: n.type, dim: !!hits && !hits.has(n.key), hit: !!hits?.has(n.key), degree: adjacency.get(n.key)?.size ?? 0 },
-    }));
-  const visible = new Set(nodes.map((n) => n.id));
-  const edges: Edge[] = graph.edges
-    .filter((e) => visible.has(e.source) && visible.has(e.target))
-    .map((e) => ({ id: e.key, source: e.source, target: e.target, ...edgeStyle(e) }));
+  const [nodes, setNodes] = useState<GNode[]>([]);
+  useEffect(() => {
+    setNodes(
+      shownNodes.map((n) => ({
+        id: n.key,
+        type: 'entity',
+        position: positions.get(n.key) ?? { x: 0, y: 0 },
+        selected: n.key === selected,
+        data: {
+          label: n.label,
+          type: n.type,
+          reading: n.type === 'note' && !!n.role && n.role !== 'note',
+          dim: !!hits && !hits.has(n.key),
+          hit: !!hits?.has(n.key),
+          connectable: connectMode,
+        },
+      })),
+    );
+  }, [shownNodes, positions, selected, hits, connectMode]);
+  const shownKeys = new Set(shownNodes.map((n) => n.key));
+  const edges: Edge[] = visibleGraph.edges
+    .filter((e) => shownKeys.has(e.source) && shownKeys.has(e.target))
+    .map((e) => ({ id: e.key, source: e.source, target: e.target, selected: selectedEdge?.key === e.key, ...edgeStyle(e) }));
 
-  const sel = selected ? graph.nodes.find((n) => n.key === selected) : undefined;
-  const neighbours = sel ? [...(adjacency.get(sel.key) ?? [])].map((k) => graph.nodes.find((n) => n.key === k)).filter((n): n is GraphNode => !!n) : [];
+  useEffect(() => {
+    if (!focus) return;
+    const t = setTimeout(() => void flow.fitView({ duration: 300, padding: 0.3, maxZoom: 1.1 }), 50);
+    return () => clearTimeout(t);
+  }, [focus, flow]);
+
+  const sel = selected ? byKey.get(selected) : undefined;
+  const outgoing = sel ? visibleGraph.edges.filter((e) => e.source === sel.key) : [];
+  const incoming = sel ? visibleGraph.edges.filter((e) => e.target === sel.key) : [];
+
+  const removeRelation = useMutation({
+    mutationFn: (id: string) => endpoints.relations.remove(id),
+    onSuccess: () => {
+      setSelectedEdge(null);
+      void qc.invalidateQueries({ queryKey: ['graph'] });
+      void qc.invalidateQueries({ queryKey: qk.relationsAll });
+      toast.success('Relação removida');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const open = (n: GraphNode) => void navigate(referencePath({ type: n.type, id: n.entityId, role: n.role, readingId: null, page: null }));
+
+  const connection = (e: GraphEdge, other: string, dir: 'in' | 'out') => {
+    const n = byKey.get(other);
+    if (!n) return null;
+    return (
+      <li key={`${dir}${e.key}`}>
+        <button type="button" onClick={() => setSelected(n.key)} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-surface-2">
+          <EntityIcon type={n.type} className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{n.label}</span>
+          <span className="shrink-0 text-[11px] text-subtle">{edgeLabel(e)}</span>
+        </button>
+      </li>
+    );
+  };
 
   return (
     <div className="relative min-h-0 flex-1">
@@ -152,16 +249,33 @@ function GraphView({ graph, structure }: { graph: Graph; structure: boolean }) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        nodesConnectable={false}
-        nodesDraggable
-        edgesFocusable={false}
-        onNodeClick={(_e, n) => setSelected(n.id)}
-        onNodeDoubleClick={(_e, n) => {
-          const g = graph.nodes.find((x) => x.key === n.id);
-          if (g) void navigate(entityPath(g.type, g.entityId));
+        // Moving nodes only changes the picture: positions are not saved and never touch data.
+        onNodesChange={(changes) => setNodes((ns) => applyNodeChanges(changes, ns))}
+        nodesConnectable={connectMode}
+        onConnect={(c: Connection) => {
+          const source = byKey.get(c.source);
+          const target = byKey.get(c.target);
+          if (source && target && source.key !== target.key) setPair({ source, target });
         }}
-        onPaneClick={() => setSelected(null)}
+        nodesDraggable
+        onNodeClick={(_e, n) => {
+          setSelected(n.id);
+          setSelectedEdge(null);
+        }}
+        onNodeDoubleClick={(_e, n) => {
+          const g = byKey.get(n.id);
+          if (g) open(g);
+        }}
+        onEdgeClick={(_e, edge) => {
+          const g = visibleGraph.edges.find((x) => x.key === edge.id);
+          setSelectedEdge(g ?? null);
+        }}
+        onPaneClick={() => {
+          setSelected(null);
+          setSelectedEdge(null);
+        }}
         fitView
+        fitViewOptions={{ maxZoom: 1.1 }}
         minZoom={0.05}
       >
         <Background gap={28} size={1} />
@@ -178,21 +292,21 @@ function GraphView({ graph, structure }: { graph: Graph; structure: boolean }) {
               if (e.key === 'Enter' && hits?.size) {
                 const first = [...hits][0]!;
                 setSelected(first);
-                const p = positions.get(first);
+                const p = nodes.find((n) => n.id === first)?.position;
                 if (p) void flow.setCenter(p.x, p.y, { zoom: 1.2, duration: 400 });
               }
             }}
             placeholder="Localizar no grafo"
             aria-label="Localizar no grafo"
-            className="h-9 w-52 rounded-lg border border-border bg-surface pr-3 pl-8 text-base shadow-card outline-none focus:border-accent sm:text-sm"
+            className="h-9 w-48 rounded-lg border border-border bg-surface pr-3 pl-8 text-base shadow-card outline-none focus:border-accent sm:text-sm"
           />
         </div>
-        {selected && (
+        {(selected || roots.size > 0) && (
           <Segmented
             label="Mostrar"
             size="sm"
-            value={focusDepth}
-            onChange={setFocusDepth}
+            value={depth}
+            onChange={setDepth}
             options={[
               { value: '0', label: 'Tudo' },
               { value: '1', label: 'Vizinhos' },
@@ -200,7 +314,24 @@ function GraphView({ graph, structure }: { graph: Graph; structure: boolean }) {
             ]}
           />
         )}
+        <Button
+          size="sm"
+          variant={connectMode ? 'primary' : 'outline'}
+          icon={<Link2 className="size-3.5" />}
+          onClick={() => setConnectMode(!connectMode)}
+          title="Arraste do ponto inferior de um item até outro para criar uma relação"
+        >
+          {connectMode ? 'Conectando…' : 'Conectar'}
+        </Button>
+        <IconButton label="Reorganizar disposição" size="sm" variant="outline" onClick={() => setLayoutSeed((s) => s + 1)}>
+          <RotateCcw className="size-4" />
+        </IconButton>
       </div>
+      {connectMode && (
+        <p className="absolute top-14 left-3 rounded-lg bg-surface/95 px-3 py-1.5 text-xs text-muted shadow-card">
+          Arraste do ponto inferior de um item até outro item para relacioná-los.
+        </p>
+      )}
 
       <div className="absolute right-3 bottom-3 hidden rounded-xl border border-border bg-surface/95 p-3 text-xs shadow-card sm:block" aria-label="Legenda">
         <p className="mb-1.5 font-medium">Legenda</p>
@@ -208,14 +339,14 @@ function GraphView({ graph, structure }: { graph: Graph; structure: boolean }) {
           {GRAPH_ENTITY_TYPES.map((t) => (
             <li key={t} className="flex items-center gap-2">
               <span className="size-2.5 rounded-full" style={{ background: ENTITY_CSS_VAR[t] }} aria-hidden />
-              {entityLabel(t)}
+              {t === 'reading' ? 'Livro / leitura / anotação' : entityLabel(t)}
             </li>
           ))}
           <li className="flex items-center gap-2 pt-1">
             <span className="h-0.5 w-5 bg-accent" aria-hidden /> Relação definida
           </li>
           <li className="flex items-center gap-2">
-            <span className="h-0.5 w-5 bg-note" aria-hidden /> Link interno
+            <span className="h-0.5 w-5 bg-note" aria-hidden /> Referência numa nota
           </li>
           {structure && (
             <li className="flex items-center gap-2">
@@ -225,58 +356,107 @@ function GraphView({ graph, structure }: { graph: Graph; structure: boolean }) {
         </ul>
       </div>
 
-      {sel && (
+      {selectedEdge && (
+        <aside className="absolute top-14 right-3 w-72 max-w-[calc(100%-1.5rem)] rounded-xl border border-border bg-surface p-4 shadow-pop" aria-label="Ligação selecionada">
+          <p className="text-xs text-subtle">{selectedEdge.relationId ? 'Relação definida' : 'Ligação derivada dos dados'}</p>
+          <p className="mt-1 text-sm">
+            {byKey.get(selectedEdge.source)?.label} <span className="text-muted">— {edgeLabel(selectedEdge)} →</span> {byKey.get(selectedEdge.target)?.label}
+          </p>
+          {selectedEdge.relationId ? (
+            <Button
+              className="mt-3"
+              size="sm"
+              variant="outline"
+              icon={<Trash className="size-3.5" />}
+              loading={removeRelation.isPending}
+              onClick={() => removeRelation.mutate(selectedEdge.relationId!)}
+            >
+              Remover relação
+            </Button>
+          ) : (
+            <p className="mt-2 text-xs text-muted">
+              Vem da hierarquia, de uma referência escrita numa nota ou de uma anotação de livro. Altere-a no próprio conteúdo.
+            </p>
+          )}
+        </aside>
+      )}
+
+      {sel && !selectedEdge && (
         <aside className="absolute top-14 right-3 w-72 max-w-[calc(100%-1.5rem)] rounded-xl border border-border bg-surface p-4 shadow-pop" aria-label="Item selecionado">
           <div className="flex items-start gap-2">
             <EntityIcon type={sel.type} />
             <div className="min-w-0 flex-1">
-              <p className="text-xs text-subtle">{entityLabel(sel.type)}</p>
+              <p className="text-xs text-subtle">{sel.role === 'annotation' ? 'Anotação de leitura' : sel.role === 'review' ? 'Resenha' : entityLabel(sel.type)}</p>
               <p className="font-medium break-words">{sel.label}</p>
             </div>
             <IconButton label="Fechar" size="sm" onClick={() => setSelected(null)}>
               <X className="size-4" />
             </IconButton>
           </div>
-          <Link to={entityPath(sel.type, sel.entityId)} className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:underline">
-            Abrir <ExternalLink className="size-3.5" aria-hidden />
-          </Link>
-          {neighbours.length > 0 && (
-            <div className="mt-3 border-t border-border pt-3">
-              <p className="mb-1.5 text-xs text-muted">{neighbours.length} conexões</p>
-              <ul className="max-h-48 space-y-0.5 overflow-y-auto">
-                {neighbours.map((n) => (
-                  <li key={n.key}>
-                    <button type="button" onClick={() => setSelected(n.key)} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-surface-2">
-                      <EntityIcon type={n.type} className="size-3.5 shrink-0" />
-                      <span className="truncate">{n.label}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <div className="mt-3 flex flex-wrap gap-3 text-sm">
+            <button type="button" onClick={() => open(sel)} className="inline-flex items-center gap-1.5 font-medium text-accent hover:underline">
+              Abrir <ExternalLink className="size-3.5" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRoots((r) => new Set([...r, sel.key]));
+                if (depth === '0') setDepth('1');
+              }}
+              className="inline-flex items-center gap-1.5 text-muted hover:text-accent"
+            >
+              <Expand className="size-3.5" aria-hidden /> Expandir vizinhos
+            </button>
+          </div>
+          <div className="scrollbar-thin mt-3 max-h-64 space-y-3 overflow-y-auto border-t border-border pt-3">
+            {outgoing.length > 0 && (
+              <div>
+                <p className="mb-1 flex items-center gap-1 text-xs text-muted">
+                  <ArrowRight className="size-3" aria-hidden /> Saídas ({outgoing.length})
+                </p>
+                <ul className="space-y-0.5">{outgoing.map((e) => connection(e, e.target, 'out'))}</ul>
+              </div>
+            )}
+            {incoming.length > 0 && (
+              <div>
+                <p className="mb-1 flex items-center gap-1 text-xs text-muted">
+                  <ArrowLeft className="size-3" aria-hidden /> Entradas ({incoming.length})
+                </p>
+                <ul className="space-y-0.5">{incoming.map((e) => connection(e, e.source, 'in'))}</ul>
+              </div>
+            )}
+            {outgoing.length + incoming.length === 0 && <p className="text-xs text-muted">Sem conexões visíveis com os filtros atuais.</p>}
+          </div>
         </aside>
       )}
+      <RelationDialog pair={pair} onClose={() => setPair(null)} />
     </div>
   );
 }
 
+/** Above this size the graph opens in an overview (topics and books). */
+const OVERVIEW_LIMIT = 200;
+
 export function Component() {
   const { tree } = useTopics();
-  const [types, setTypes] = useState<Set<GraphEntityType>>(new Set(GRAPH_ENTITY_TYPES));
+  const [params] = useSearchParams();
+  const focus = params.get('focus');
+  const [hidden, setHidden] = useState<Set<GraphEntityType> | null>(null);
   const [structure, setStructure] = useState(true);
   const [topicId, setTopicId] = useState('');
-  const params = { types: [...types].join(','), structure: String(structure), ...(topicId ? { topicId } : {}) };
-  const graph = useQuery({ queryKey: qk.graph(params), queryFn: () => endpoints.graph(params), placeholderData: (prev) => prev });
+  const query = { structure: 'true', ...(topicId ? { topicId } : {}) };
+  const graph = useQuery({ queryKey: qk.graph(query), queryFn: () => endpoints.graph(query), placeholderData: (prev) => prev });
 
-  const toggle = (t: GraphEntityType) =>
-    setTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) {
-        if (next.size > 1) next.delete(t);
-      } else next.add(t);
-      return next;
-    });
+  // Default: everything when focused or small; an overview of topics and books when large.
+  const overview = !focus && (graph.data?.nodes.length ?? 0) > OVERVIEW_LIMIT;
+  const effectiveHidden = hidden ?? new Set<GraphEntityType>(overview ? ['note', 'document', 'concept'] : []);
+  const toggle = (t: GraphEntityType) => {
+    const next = new Set(effectiveHidden);
+    if (next.has(t)) next.delete(t);
+    else if (next.size < GRAPH_ENTITY_TYPES.length - 1) next.add(t);
+    setHidden(next);
+  };
+  const hiddenCount = graph.data?.nodes.filter((n) => effectiveHidden.has(n.type)).length ?? 0;
 
   return (
     <div className="flex h-[calc(100dvh-3.25rem-4rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col lg:h-dvh">
@@ -288,12 +468,12 @@ export function Component() {
           {GRAPH_ENTITY_TYPES.map((t) => (
             <Checkbox
               key={t}
-              checked={types.has(t)}
+              checked={!effectiveHidden.has(t)}
               onChange={() => toggle(t)}
               label={
                 <span className="inline-flex items-center gap-1.5">
                   <span className="size-2 rounded-full" style={{ background: ENTITY_CSS_VAR[t] }} aria-hidden />
-                  {entityLabel(t)}s
+                  {t === 'reading' ? 'Livros' : `${entityLabel(t)}s`}
                 </span>
               }
             />
@@ -305,7 +485,7 @@ export function Component() {
             <option value="">Todos os assuntos</option>
             {tree.flat.map((t) => (
               <option key={t.id} value={t.id}>
-                {'  '.repeat(t.depth)}
+                {'  '.repeat(t.depth)}
                 {t.title}
               </option>
             ))}
@@ -313,9 +493,15 @@ export function Component() {
         </div>
         {graph.data && (
           <span className="text-xs text-muted">
-            {graph.data.nodes.length} itens · {graph.data.edges.length} ligações
-            {graph.data.truncated && ' · limitado aos mais recentes; use os filtros'}
+            {graph.data.nodes.length - hiddenCount} itens
+            {hiddenCount > 0 && ` (${hiddenCount} ocultos pelos filtros)`}
+            {graph.data.truncated && ' · limitado aos mais recentes; filtre por assunto'}
           </span>
+        )}
+        {focus && (
+          <Link to="/graph" className="text-xs text-accent hover:underline">
+            Ver o grafo inteiro
+          </Link>
         )}
       </div>
       {graph.isLoading ? (
@@ -327,16 +513,17 @@ export function Component() {
           className="flex-1"
           icon={<Waypoints />}
           title="Nada para mostrar"
-          description="O grafo aparece conforme você cria assuntos, notas com links internos e relações entre itens."
-          action={
-            <Button variant="outline" onClick={() => setTypes(new Set(GRAPH_ENTITY_TYPES))}>
-              Mostrar todos os tipos
-            </Button>
-          }
+          description="O grafo é gerado dos seus dados: hierarquia de assuntos, referências escritas com / nas notas, livros e anotações, e relações."
         />
       ) : (
         <ReactFlowProvider>
-          <GraphView key={JSON.stringify(params)} graph={graph.data} structure={structure} />
+          <GraphView
+            key={`${topicId}|${focus ?? ''}`}
+            graph={graph.data}
+            structure={structure}
+            focus={focus && graph.data.nodes.some((n) => n.key === focus) ? focus : null}
+            hidden={effectiveHidden}
+          />
         </ReactFlowProvider>
       )}
     </div>

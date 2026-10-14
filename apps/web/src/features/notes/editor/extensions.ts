@@ -3,6 +3,8 @@ import { TaskList } from '@tiptap/extension-task-list';
 import { Placeholder } from '@tiptap/extensions';
 import StarterKit from '@tiptap/starter-kit';
 import { INTERNAL_LINK_PREFIX, isAllowedHref } from '@mynotes/shared';
+import { ReferenceNode } from './reference-node';
+import { Triggers } from './triggers';
 
 /** Editor schema. Must only produce nodes the API accepts (see shared/text.ts). */
 export function noteExtensions(placeholder: string) {
@@ -22,6 +24,9 @@ export function noteExtensions(placeholder: string) {
     TaskList,
     TaskItem.configure({ nested: true }),
     Placeholder.configure({ placeholder }),
+    // "/" references (stored by id) and "#" tags.
+    ReferenceNode,
+    Triggers,
   ];
 }
 

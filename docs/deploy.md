@@ -60,6 +60,8 @@ O workflow **Publicar API** (`.github/workflows/deploy-worker.yml`) é **manual*
 
 O workflow roda os testes, lista as migrações pendentes no D1 remoto e **recusa** migrações com `DROP`, `DELETE FROM`, `ALTER TABLE … DROP/RENAME` ou `UPDATE … SET` fora de triggers, a menos que “Permitir migrações destrutivas” seja marcado. Antes de marcar, exporte um backup e anote o horário para um eventual *Time Travel*.
 
+**Migração `0002_knowledge_links.sql`** (aditiva, sem `UPDATE`/`DELETE`): novas colunas em `notes` (`role`, `reading_id`, `page`, `annotation_type`, `quote`, `index_version`) e as tabelas `note_tags` e `view_layouts`. Aplique-a **antes** de publicar o Worker novo: `npm run db:migrate:remote -w @mynotes/api`, depois `npm run deploy -w @mynotes/api`. O frontend publicado pelo GitHub Pages depende da API nova (referências, tags, livros); publique a API primeiro. Para reverter, exporte um backup e remova as tabelas novas; as colunas novas são ignoradas por versões anteriores da API.
+
 Ordem segura para mudanças de esquema: migrações **aditivas** primeiro (novas tabelas/colunas com valor padrão), depois o código que as usa; remoções só numa migração posterior, quando nenhum código depender da estrutura antiga.
 
 ## 2. GitHub Pages — frontend

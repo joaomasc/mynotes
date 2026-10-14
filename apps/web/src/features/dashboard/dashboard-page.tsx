@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { BookOpen, CalendarDays, FolderTree, Plus, Star, StickyNote, Target, TriangleAlert, Upload } from 'lucide-react';
+import { BookOpen, FolderTree, Plus, Star, StickyNote, Target, TriangleAlert, Upload, Waypoints } from 'lucide-react';
 import type { Dashboard } from '@mynotes/shared';
 import { Button } from '@/components/ui/button';
 import { ErrorState, Progress, Skeleton } from '@/components/ui/feedback';
@@ -31,7 +31,7 @@ function Onboarding() {
     { icon: <FolderTree />, title: 'Organize por assuntos', text: 'Crie um assunto na barra lateral e quantos subassuntos precisar.', to: null },
     { icon: <StickyNote />, title: 'Escreva notas', text: 'O editor salva sozinho, inclusive sem conexão.', action: () => createNote.mutate(null) },
     { icon: <Upload />, title: 'Guarde seus PDFs', text: 'Envie livros e artigos para a biblioteca e leia aqui mesmo.', to: '/library?upload=1' },
-    { icon: <CalendarDays />, title: 'Registre seus estudos', text: 'Use o cronômetro e acompanhe o tempo por assunto.', to: '/study' },
+    { icon: <Waypoints />, title: 'Conecte as ideias', text: 'Numa nota, digite / para citar um assunto, nota ou livro e # para marcar com uma tag.', to: null },
   ];
   return (
     <Card className="p-5 sm:p-6">
@@ -156,7 +156,7 @@ export function Component() {
               </Section>
 
               {(data.readingsInProgress.length > 0 || data.overdueReadings.length > 0) && (
-                <Section title="Leituras" action={<Link to="/readings" className="text-xs text-accent hover:underline">Ver todas</Link>}>
+                <Section title="Leituras" action={<Link to="/library" className="text-xs text-accent hover:underline">Ver biblioteca</Link>}>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {data.readingsInProgress.map((r) => (
                       <Link key={r.id} to={`/readings/${r.id}`} className="rounded-xl border border-border bg-surface p-4 hover:border-border-strong">
@@ -197,7 +197,8 @@ export function Component() {
             </div>
 
             <div className="space-y-8">
-              <Section title="Estudos" action={<Link to="/study" className="text-xs text-accent hover:underline">Abrir diário</Link>}>
+              {(data.study.recent.length > 0 || weeklyGoal > 0) && (
+              <Section title="Tempo de estudo" action={<Link to="/study" className="text-xs text-accent hover:underline">Histórico</Link>}>
                 <Card className="p-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -233,11 +234,9 @@ export function Component() {
                       ))}
                     </ul>
                   )}
-                  <Link to="/study?log=1" className="mt-4 inline-flex text-sm font-medium text-accent hover:underline">
-                    Registrar sessão
-                  </Link>
                 </Card>
               </Section>
+              )}
 
               {data.upcomingGoals.length > 0 && (
                 <Section title="Próximas metas">

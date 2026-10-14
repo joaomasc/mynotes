@@ -1,4 +1,4 @@
-import { INTERNAL_LINK_PREFIX, INTERNAL_LINK_TYPES, type InternalLinkType } from './constants';
+import { INTERNAL_LINK_PREFIX, INTERNAL_LINK_TYPES, NOTE_TAGS_MAX, TAG_MAX_LENGTH, type InternalLinkType } from './constants';
 import { isUuid } from './ids';
 
 /** Lowercase, accent-free, whitespace-collapsed text used for searching. */
@@ -56,6 +56,15 @@ export interface RichTextDoc extends RichTextNode {
 
 export const EMPTY_DOC: RichTextDoc = { type: 'doc', content: [] };
 
+/**
+ * Coerces editor/ProseMirror JSON into a RichTextDoc. ProseMirror drops the
+ * `content` key of empty nodes, so an empty document comes out as
+ * `{ type: 'doc' }`.
+ */
+export function asRichTextDoc(json: { type?: string; content?: RichTextNode[] } | null | undefined): RichTextDoc {
+  return { ...json, type: 'doc', content: Array.isArray(json?.content) ? json.content : [] };
+}
+
 const BLOCK_TYPES = new Set([
   'paragraph',
   'heading',
@@ -72,18 +81,49 @@ const BLOCK_TYPES = new Set([
 export interface InternalLink {
   type: InternalLinkType;
   id: string;
+  /** Page of a book/reading (`mynotes:reading/<id>/p/<page>`). */
+  page?: number | undefined;
 }
 
+/**
+ * Internal links identify the target by its stable id, never by its title:
+ * `mynotes:<type>/<id>`, or `mynotes:reading/<id>/p/<page>` for a page.
+ */
 export function parseInternalHref(href: unknown): InternalLink | null {
   if (typeof href !== 'string' || !href.startsWith(INTERNAL_LINK_PREFIX)) return null;
-  const [type, id] = href.slice(INTERNAL_LINK_PREFIX.length).split('/');
+  const [type, id, anchor, value] = href.slice(INTERNAL_LINK_PREFIX.length).split('/');
   if (!type || !id) return null;
   if (!(INTERNAL_LINK_TYPES as readonly string[]).includes(type) || !isUuid(id)) return null;
+  if (type === 'reading' && anchor === 'p' && value && /^[1-9]\d{0,5}$/.test(value)) {
+    return { type, id, page: Number(value) };
+  }
   return { type: type as InternalLinkType, id };
 }
 
-export function internalHref(type: InternalLinkType, id: string): string {
-  return `${INTERNAL_LINK_PREFIX}${type}/${id}`;
+export function internalHref(type: InternalLinkType, id: string, page?: number | null): string {
+  return `${INTERNAL_LINK_PREFIX}${type}/${id}${type === 'reading' && page ? `/p/${page}` : ''}`;
+}
+
+/**
+ * Tags are written inline as `#name`. They start with a letter and follow the
+ * start of the text, a space or punctuation, so `C#`, `#1`, `a/#b` and URL
+ * fragments are not tags.
+ */
+export const TAG_PATTERN = /(^|[\s([{"'“‘,;:!?.])#(\p{L}[\p{L}\p{N}_-]*)/gu;
+
+/** Canonical form of a tag: lowercase and without accents ("#Crítica" → "critica"). */
+export function normalizeTag(name: string): string {
+  return normalizeSearch(name.replace(/^#/, '')).replace(/\s+/g, '-').slice(0, TAG_MAX_LENGTH);
+}
+
+export function extractTags(text: string): string[] {
+  const tags = new Set<string>();
+  for (const match of text.matchAll(TAG_PATTERN)) {
+    const tag = normalizeTag(match[2]!);
+    if (tag) tags.add(tag);
+    if (tags.size >= NOTE_TAGS_MAX) break;
+  }
+  return [...tags];
 }
 
 const SAFE_EXTERNAL_HREF = /^(https?:\/\/|mailto:)/i;
@@ -97,7 +137,12 @@ export interface DocAnalysis {
   text: string;
   wordCount: number;
   links: InternalLink[];
+  /** Normalized #tags (text in code is ignored). */
+  tags: string[];
 }
+
+/** Inline node types that point to another item through `attrs.href`. */
+const REFERENCE_NODES = new Set(['internalLink', 'mention', 'reference']);
 
 /**
  * Walks a rich-text document once and extracts plain text, word count and
@@ -106,12 +151,19 @@ export interface DocAnalysis {
  */
 export function analyzeDoc(doc: RichTextNode): DocAnalysis {
   const parts: string[] = [];
+  const tagText: string[] = [];
   const links = new Map<string, InternalLink>();
 
-  const visit = (node: RichTextNode, depth: number): void => {
+  const visit = (node: RichTextNode, depth: number, inCode: boolean): void => {
     if (depth > 200) return;
-    if (typeof node.text === 'string') parts.push(node.text);
-    if (node.type === 'hardBreak') parts.push('\n');
+    if (typeof node.text === 'string') {
+      parts.push(node.text);
+      tagText.push(inCode || node.marks?.some((m) => m.type === 'code') ? ' ' : node.text);
+    }
+    if (node.type === 'hardBreak') {
+      parts.push('\n');
+      tagText.push('\n');
+    }
     if (node.marks) {
       node.marks = node.marks.filter((mark) => {
         if (mark.type !== 'link') return true;
@@ -122,15 +174,21 @@ export function analyzeDoc(doc: RichTextNode): DocAnalysis {
         return true;
       });
     }
-    if (node.type === 'internalLink' || node.type === 'mention') {
+    if (REFERENCE_NODES.has(node.type)) {
       const internal = parseInternalHref(node.attrs?.href);
       if (internal) links.set(`${internal.type}:${internal.id}`, internal);
+      // Only internal targets are allowed; anything else renders as a broken reference.
+      else if (node.attrs && 'href' in node.attrs) node.attrs.href = null;
       if (typeof node.attrs?.label === 'string') parts.push(node.attrs.label);
+      tagText.push(' ');
     }
-    for (const child of node.content ?? []) visit(child, depth + 1);
-    if (BLOCK_TYPES.has(node.type)) parts.push('\n');
+    for (const child of node.content ?? []) visit(child, depth + 1, inCode || node.type === 'codeBlock');
+    if (BLOCK_TYPES.has(node.type)) {
+      parts.push('\n');
+      tagText.push('\n');
+    }
   };
-  visit(doc, 0);
+  visit(doc, 0, false);
 
   const text = parts
     .join('')
@@ -138,7 +196,7 @@ export function analyzeDoc(doc: RichTextNode): DocAnalysis {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   const wordCount = text.length === 0 ? 0 : text.split(/\s+/).filter(Boolean).length;
-  return { text, wordCount, links: [...links.values()] };
+  return { text, wordCount, links: [...links.values()], tags: extractTags(tagText.join('')) };
 }
 
 export function makeExcerpt(text: string, max = 240): string {

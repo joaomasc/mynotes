@@ -46,6 +46,7 @@ export const router = createBrowserRouter(
           children: [
             { index: true, ...page(() => import('@/features/dashboard/dashboard-page')) },
             { path: 'topics/:id', ...page(() => import('@/features/topics/topic-page')) },
+            { path: 'topics/:id/map', ...page(() => import('@/features/topics/topic-map-page')) },
             { path: 'notes', ...page(() => import('@/features/notes/notes-page')) },
             { path: 'notes/:id', ...page(() => import('@/features/notes/note-page')) },
             { path: 'library', ...page(() => import('@/features/documents/library-page')) },

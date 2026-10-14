@@ -11,6 +11,8 @@ import {
   zNoteSummary,
   zNoteUpdate,
   zPageQuery,
+  zTagCount,
+  zTagListQuery,
 } from '@mynotes/shared';
 import type { ApiApp } from '../../app';
 import { errors, idParam, jsonBody, noContent, ok, okPage, secured } from '../../lib/openapi';
@@ -145,9 +147,22 @@ export function noteRoutes(app: ApiApp) {
   app.openapi(
     createRoute({
       method: 'get',
+      path: '/tags',
+      tags,
+      summary: 'Tags (#) usadas nas notas, com contagem',
+      security: secured,
+      request: { query: zTagListQuery },
+      responses: { 200: ok(z.array(zTagCount)), ...errors },
+    }),
+    async (c) => c.json({ data: await notes.listTags(c.env.DB, c.get('userId'), c.req.valid('query')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
       path: '/backlinks/{type}/{id}',
       tags,
-      summary: 'Notas que contêm links internos para o item',
+      summary: 'Notas, resenhas e anotações que referenciam o item',
       security: secured,
       request: {
         params: z.object({ type: z.enum(['note', 'topic', 'document', 'reading', 'concept']), id: zId }),

@@ -3,7 +3,9 @@ import { Dialog as RDialog } from 'radix-ui';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   BookOpen,
-  CalendarDays,
+  Ellipsis,
+  FolderPlus,
+  FolderTree,
   House,
   LibraryBig,
   ListTodo,
@@ -16,6 +18,7 @@ import {
   Search,
   Settings,
   StickyNote,
+  Trash,
   Upload,
   Waypoints,
   X,
@@ -23,44 +26,80 @@ import {
 import { IconButton } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Kbd } from '@/components/ui/feedback';
-import { Menu } from '@/components/ui/menu';
+import { Menu, type MenuEntry } from '@/components/ui/menu';
 import { logout, useAuth } from '@/lib/auth/session';
 import { cn } from '@/lib/cn';
 import { isTypingTarget, useLocalPreference } from '@/lib/hooks';
 import { notesSync } from '@/lib/sync/notes-sync';
 import { useConfirm } from '@/components/ui/dialog';
 import { TopicTree } from '@/features/topics/topic-tree';
+import { TopicFormDialog } from '@/features/topics/topic-dialogs';
+import { useCurrentTopic } from '@/features/topics/use-current-topic';
 import { useCreateNote } from '@/features/notes/use-create-note';
 import { CommandPaletteProvider, useCommandPalette } from './command-palette';
 import { SyncIndicator } from './sync-indicator';
 
+/**
+ * Main destinations. Topics live in the tree below; books and readings are
+ * part of the library. Study sessions are reached from each topic (and from
+ * Settings) instead of being a module of their own.
+ */
 const NAV = [
-  { to: '/', label: 'Início', icon: House, end: true },
-  { to: '/notes', label: 'Notas', icon: StickyNote },
-  { to: '/library', label: 'Biblioteca', icon: LibraryBig },
-  { to: '/readings', label: 'Leituras', icon: BookOpen },
-  { to: '/plans', label: 'Planos', icon: ListTodo },
-  { to: '/study', label: 'Estudos', icon: CalendarDays },
-  { to: '/maps', label: 'Mapas mentais', icon: Network },
-  { to: '/graph', label: 'Grafo', icon: Waypoints },
+  { to: '/', label: 'Início', icon: House, end: true, also: [] as string[] },
+  { to: '/notes', label: 'Notas', icon: StickyNote, also: [] },
+  { to: '/library', label: 'Biblioteca', icon: LibraryBig, also: ['/readings'] },
+  { to: '/graph', label: 'Grafo', icon: Waypoints, also: [] },
 ];
 
-function useQuickCreate() {
+const MORE: { to: string; label: string; icon: typeof House }[] = [
+  { to: '/plans', label: 'Planos de leitura', icon: ListTodo },
+  { to: '/maps', label: 'Mapas livres', icon: Network },
+  { to: '/trash', label: 'Lixeira', icon: Trash },
+];
+
+/**
+ * Items of the "+" menu. Inside a topic (or a note/book that belongs to one)
+ * new items are created there; at the root nothing is attached by default.
+ */
+function useQuickCreate(): { items: MenuEntry[]; dialog: ReactNode } {
   const navigate = useNavigate();
   const createNote = useCreateNote();
-  return [
-    { label: 'Nova nota', icon: <StickyNote />, onSelect: () => createNote.mutate(null), shortcut: 'Alt+N' },
-    { label: 'Registrar sessão de estudo', icon: <CalendarDays />, onSelect: () => void navigate('/study?log=1') },
-    { label: 'Nova leitura', icon: <BookOpen />, onSelect: () => void navigate('/readings?new=1') },
-    { label: 'Enviar documento', icon: <Upload />, onSelect: () => void navigate('/library?upload=1') },
-    { label: 'Novo mapa mental', icon: <Network />, onSelect: () => void navigate('/maps?new=1') },
-  ];
+  const topic = useCurrentTopic();
+  const [topicDialog, setTopicDialog] = useState<{ parentId: string | null } | null>(null);
+  const withTopic = topic ? `&topicId=${topic.id}` : '';
+  const items: MenuEntry[] = topic
+    ? [
+        { label: `Nota em “${topic.title}”`, icon: <StickyNote />, onSelect: () => createNote.mutate(topic.id), shortcut: 'Alt+N' },
+        { label: `Subassunto em “${topic.title}”`, icon: <FolderPlus />, onSelect: () => setTopicDialog({ parentId: topic.id }) },
+        'separator',
+        { label: 'Nota sem assunto', icon: <StickyNote />, onSelect: () => createNote.mutate(null) },
+        { label: 'Novo assunto (caderno)', icon: <FolderTree />, onSelect: () => setTopicDialog({ parentId: null }) },
+      ]
+    : [
+        { label: 'Nova nota', icon: <StickyNote />, onSelect: () => createNote.mutate(null), shortcut: 'Alt+N' },
+        { label: 'Novo assunto (caderno)', icon: <FolderTree />, onSelect: () => setTopicDialog({ parentId: null }) },
+      ];
+  items.push(
+    'separator',
+    { label: 'Novo livro ou leitura', icon: <BookOpen />, onSelect: () => void navigate(`/library?new=book${withTopic}`) },
+    { label: 'Enviar documento', icon: <Upload />, onSelect: () => void navigate(`/library?upload=1${withTopic}`) },
+  );
+  const dialog = (
+    <TopicFormDialog open={!!topicDialog} onOpenChange={(o) => !o && setTopicDialog(null)} parentId={topicDialog?.parentId ?? null} />
+  );
+  return { items, dialog };
 }
 
 function NavItems({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const item = cn(
+    'flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-sm transition-colors lg:h-8',
+    collapsed && 'justify-center px-0',
+  );
   return (
     <nav aria-label="Principal" className="space-y-px">
-      {NAV.map(({ to, label, icon: Icon, end }) => (
+      {NAV.map(({ to, label, icon: Icon, end, also }) => (
         <NavLink
           key={to}
           to={to}
@@ -69,9 +108,10 @@ function NavItems({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?:
           title={collapsed ? label : undefined}
           className={({ isActive }) =>
             cn(
-              'flex h-9 items-center gap-3 rounded-lg px-2.5 text-sm transition-colors lg:h-8',
-              isActive ? 'bg-surface-3 font-medium text-text' : 'text-muted hover:bg-surface-2 hover:text-text',
-              collapsed && 'justify-center px-0',
+              item,
+              isActive || also.some((p) => pathname.startsWith(p))
+                ? 'bg-surface-3 font-medium text-text'
+                : 'text-muted hover:bg-surface-2 hover:text-text',
             )
           }
         >
@@ -79,6 +119,31 @@ function NavItems({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?:
           <span className={cn(collapsed && 'sr-only')}>{label}</span>
         </NavLink>
       ))}
+      <Menu
+        label="Mais destinos"
+        align="start"
+        trigger={
+          <button
+            type="button"
+            title={collapsed ? 'Mais' : undefined}
+            className={cn(
+              item,
+              MORE.some((m) => pathname.startsWith(m.to)) ? 'font-medium text-text' : 'text-muted hover:bg-surface-2 hover:text-text',
+            )}
+          >
+            <Ellipsis className="size-4 shrink-0" aria-hidden />
+            <span className={cn(collapsed && 'sr-only')}>Mais</span>
+          </button>
+        }
+        items={MORE.map(({ to, label, icon: Icon }) => ({
+          label,
+          icon: <Icon />,
+          onSelect: () => {
+            onNavigate?.();
+            void navigate(to);
+          },
+        }))}
+      />
     </nav>
   );
 }
@@ -175,8 +240,9 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
               <Plus className="size-4" />
             </IconButton>
           }
-          items={quick}
+          items={quick.items}
         />
+        {quick.dialog}
       </div>
       <NavItems collapsed={collapsed} />
       <div className={cn('scrollbar-thin -mx-1 min-h-0 flex-1 overflow-y-auto px-1', collapsed && 'hidden')}>
@@ -267,10 +333,11 @@ function MobileBottomNav({ onMenu }: { onMenu: () => void }) {
                 <Plus className="size-6" />
               </button>
             }
-            items={quick}
+            items={quick.items}
           />
+          {quick.dialog}
         </div>
-        {item('/study', 'Estudos', CalendarDays)}
+        {item('/library', 'Biblioteca', LibraryBig)}
         <button type="button" onClick={onMenu} className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] text-muted">
           <MenuIcon className="size-5" aria-hidden />
           Mais
@@ -287,7 +354,9 @@ function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     ['Recolher barra lateral', <Kbd key="b">Ctrl \</Kbd>],
     ['Salvar nota agora', <Kbd key="s">Ctrl S</Kbd>],
     ['Inserir link (no editor)', <Kbd key="l">Ctrl K</Kbd>],
-    ['Ir para Início / Notas / Estudos', <span key="g"><Kbd>G</Kbd> + <Kbd>H</Kbd> / <Kbd>N</Kbd> / <Kbd>E</Kbd></span>],
+    ['Ir para Início / Notas / Biblioteca / Grafo', <span key="g"><Kbd>G</Kbd> + <Kbd>H</Kbd> / <Kbd>N</Kbd> / <Kbd>B</Kbd> / <Kbd>G</Kbd></span>],
+    ['Referenciar um item (no editor)', <Kbd key="r">/</Kbd>],
+    ['Marcar com tag (no editor)', <Kbd key="t">#</Kbd>],
     ['Mostrar atalhos', <Kbd key="q">?</Kbd>],
   ];
   return (
@@ -308,6 +377,7 @@ function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
 function GlobalShortcuts({ onToggleSidebar, onHelp }: { onToggleSidebar: () => void; onHelp: () => void }) {
   const navigate = useNavigate();
   const createNote = useCreateNote();
+  const topicId = useCurrentTopic()?.id ?? null;
   useEffect(() => {
     let lastG = 0;
     const onKey = (e: KeyboardEvent) => {
@@ -318,23 +388,23 @@ function GlobalShortcuts({ onToggleSidebar, onHelp }: { onToggleSidebar: () => v
       }
       if (e.altKey && !e.ctrlKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        createNote.mutate(null);
+        createNote.mutate(topicId);
         return;
       }
       if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === '?') {
         onHelp();
-      } else if (e.key.toLowerCase() === 'g') {
-        lastG = Date.now();
       } else if (Date.now() - lastG < 1000) {
-        const to = { h: '/', n: '/notes', e: '/study', b: '/library', l: '/readings' }[e.key.toLowerCase()];
+        const to = { h: '/', n: '/notes', b: '/library', g: '/graph' }[e.key.toLowerCase()];
         if (to) void navigate(to);
         lastG = 0;
+      } else if (e.key.toLowerCase() === 'g') {
+        lastG = Date.now();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [navigate, createNote, onToggleSidebar, onHelp]);
+  }, [navigate, createNote, topicId, onToggleSidebar, onHelp]);
   return null;
 }
 

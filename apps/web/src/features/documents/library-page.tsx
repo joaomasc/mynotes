@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent } from 'react';
+import { useEffect, useState, type DragEvent, type ReactNode } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { LibraryBig, Search, Upload } from 'lucide-react';
@@ -12,11 +12,34 @@ import { fileSize, relativeTime } from '@/lib/format';
 import { useDebounced } from '@/lib/hooks';
 import { qk } from '@/lib/query';
 import { TopicChip } from '../shared/topic-breadcrumb';
+import { ReadingsView } from '../readings/readings-page';
 import { useTopics } from '../topics/use-topics';
 import { DocIcon, docTypeLabel } from './doc-icon';
 import { UploadDialog } from './upload-dialog';
 
+/** Library: books/readings (default) and documents, one switch apart. */
 export function Component() {
+  const [params, setParams] = useSearchParams();
+  const view = params.get('view') === 'docs' || params.get('upload') === '1' ? 'docs' : 'books';
+  const switcher = (
+    <Segmented
+      label="Mostrar"
+      value={view}
+      onChange={(v) => {
+        const next = new URLSearchParams();
+        if (v === 'docs') next.set('view', 'docs');
+        setParams(next, { replace: true });
+      }}
+      options={[
+        { value: 'books', label: 'Livros e leituras' },
+        { value: 'docs', label: 'Documentos' },
+      ]}
+    />
+  );
+  return view === 'docs' ? <DocumentsView switcher={switcher} /> : <ReadingsView switcher={switcher} />;
+}
+
+function DocumentsView({ switcher }: { switcher: ReactNode }) {
   const [params, setParams] = useSearchParams();
   const { tree } = useTopics();
   const [q, setQ] = useState(params.get('q') ?? '');
@@ -79,13 +102,14 @@ export function Component() {
       >
         <PageHeader
           title="Biblioteca"
-          subtitle="PDFs, livros, artigos e outros arquivos, armazenados de forma privada."
+          subtitle="PDFs e outros arquivos, armazenados de forma privada. Para ler e anotar um PDF, vincule-o a um livro."
           actions={
             <Button variant="primary" icon={<Upload className="size-4" />} onClick={() => setUpload({})}>
               Enviar
             </Button>
           }
         />
+        <div className="mb-4">{switcher}</div>
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <div className="relative min-w-56 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-subtle" aria-hidden />

@@ -8,7 +8,7 @@ import {
   SEARCH_ENTITY_TYPES,
 } from '../constants';
 import { zDate, zDateTime, zId, zTitle, zTrimmed, zVersion } from './common';
-import { zNoteSummary, zReading, zTopicWithCounts, zUpcomingGoal } from './content';
+import { zBacklink, zNoteRole, zNoteSummary, zReading, zTagCount, zTopicWithCounts, zUpcomingGoal } from './content';
 
 const zTimestamps = {
   version: zVersion,
@@ -236,7 +236,12 @@ export type MindMapUpdate = z.input<typeof zMindMapUpdate>;
 
 /* ------------------------------------------------------------------ Graph */
 
-export const GRAPH_EDGE_KINDS = [...RELATION_KINDS, 'parent', 'contains', 'links_to'] as const;
+/**
+ * Derived edges: `parent` (topic hierarchy), `contains` (item in a topic),
+ * `links_to` (reference written in a note), `annotates` (review or page
+ * annotation of a book). The others are explicit relations.
+ */
+export const GRAPH_EDGE_KINDS = [...RELATION_KINDS, 'parent', 'contains', 'links_to', 'annotates'] as const;
 export type GraphEdgeKind = (typeof GRAPH_EDGE_KINDS)[number];
 
 export const zGraphNode = z.object({
@@ -246,6 +251,8 @@ export const zGraphNode = z.object({
   entityId: zId,
   label: z.string(),
   topicId: zId.nullable(),
+  /** For notes: whether it is a note, a book review or a page annotation. */
+  role: zNoteRole.nullable(),
 });
 export type GraphNode = z.infer<typeof zGraphNode>;
 
@@ -336,8 +343,99 @@ export const zSearchResult = z.object({
   snippet: z.string(),
   topicId: zId.nullable(),
   updatedAt: zDateTime,
+  /** Notes only: reviews and page annotations carry their book and page. */
+  role: zNoteRole.nullable().optional(),
+  readingId: zId.nullable().optional(),
+  readingTitle: z.string().nullable().optional(),
+  page: z.number().int().nullable().optional(),
 });
 export type SearchResult = z.infer<typeof zSearchResult>;
+
+/* ------------------------------------------------------------ References */
+
+/**
+ * An item that can be referenced from a note with `/` (and shown as a link).
+ * Identified by type + id; `title` is the current title, so references keep
+ * working when the target is renamed.
+ */
+export const zReference = z.object({
+  type: zGraphEntityType,
+  id: zId,
+  title: z.string(),
+  /** False when the target was deleted (or is in the trash): a broken reference. */
+  exists: z.boolean(),
+  topicId: zId.nullable(),
+  role: zNoteRole.nullable(),
+  readingId: zId.nullable(),
+  readingTitle: z.string().nullable(),
+  page: z.number().int().nullable(),
+  /** Readings: 'book', 'article', ... */
+  materialType: z.string().nullable(),
+});
+export type Reference = z.infer<typeof zReference>;
+
+export const zReferenceSuggestQuery = z.object({
+  q: z.string().trim().max(200).default(''),
+  /** Comma-separated subset of: topic, note, reading, annotation, document, concept. */
+  types: z.string().max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(30).default(12),
+});
+
+export const zReferenceResolveQuery = z.object({
+  /** Comma-separated `type:id` pairs. */
+  refs: z.string().max(5000),
+});
+
+export const zTagListQuery = z.object({
+  q: z.string().trim().max(60).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+/* ------------------------------------------------------- Topic context */
+
+/** What a topic page shows besides its notes: computed from real links. */
+export const zTopicContext = z.object({
+  /** Books/readings in the topic or explicitly related to it. */
+  readings: z.array(zReading.extend({ annotationCount: z.number().int(), via: z.enum(['topic', 'relation']) })),
+  /** Reviews and page annotations that reference the topic or belong to its books. */
+  annotations: z.array(zNoteSummary.extend({ readingTitle: z.string().nullable() })),
+  /** Notes that reference the topic (backlinks). */
+  mentions: z.array(zBacklink),
+  /** Tags used by the topic's notes. */
+  tags: z.array(zTagCount),
+  study: z.object({ totalSeconds: z.number().int(), sessionCount: z.number().int(), lastAt: zDateTime.nullable() }),
+});
+export type TopicContext = z.infer<typeof zTopicContext>;
+
+/* ---------------------------------------------------------- View layouts */
+
+const zPoint = z.object({ x: z.number().finite(), y: z.number().finite() });
+
+/**
+ * Presentation of a generated view (e.g. a topic's mind map): node positions
+ * and collapsed branches. Never used to derive hierarchy or relations.
+ */
+export const zViewLayoutData = z.object({
+  positions: z.record(z.string().max(120), zPoint).default({}),
+  collapsed: z.array(z.string().max(120)).max(5000).default([]),
+  viewport: z.object({ x: z.number().finite(), y: z.number().finite(), zoom: z.number().min(0.05).max(10) }).nullable().default(null),
+});
+export type ViewLayoutData = z.infer<typeof zViewLayoutData>;
+
+export const zViewLayout = z.object({
+  key: z.string(),
+  data: zViewLayoutData,
+  version: zVersion,
+  updatedAt: zDateTime,
+});
+export type ViewLayout = z.infer<typeof zViewLayout>;
+
+export const zViewLayoutPut = z.object({
+  data: zViewLayoutData,
+  /** Omit when saving the layout for the first time. */
+  baseVersion: zVersion.optional(),
+});
+export const VIEW_KEY_PATTERN = /^(mindmap|graph):[a-z]+:[0-9a-f-]{36}$/;
 
 /* ----------------------------------------------------------------- Trash */
 

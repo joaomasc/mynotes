@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useMatch, useNavigate } from 'react-router';
 import { toast } from 'sonner';
-import { ChevronRight, Ellipsis, FolderInput, FolderTree, Pencil, Plus, StickyNote, Trash } from 'lucide-react';
+import { ChevronRight, Ellipsis, FolderInput, FolderTree, Network, Pencil, Plus, StickyNote, Trash, Waypoints } from 'lucide-react';
 import { IconButton } from '@/components/ui/button';
 import { Menu } from '@/components/ui/menu';
 import { errorMessage } from '@/lib/api/client';
@@ -250,6 +250,9 @@ export function TopicTree({ onNavigate }: { onNavigate?: () => void }) {
             items={[
               { label: 'Nova nota aqui', icon: <StickyNote />, onSelect: () => createNote.mutate(node.id) },
               { label: 'Novo subassunto', icon: <Plus />, onSelect: () => setDialog({ kind: 'create', parentId: node.id }) },
+              'separator',
+              { label: 'Mapa mental', icon: <Network />, onSelect: () => void navigate(`/topics/${node.id}/map`) },
+              { label: 'Ver no grafo', icon: <Waypoints />, onSelect: () => void navigate(`/graph?focus=topic:${node.id}`) },
               'separator',
               { label: 'Editar', icon: <Pencil />, onSelect: () => setDialog({ kind: 'edit', node }) },
               { label: 'Mover para…', icon: <FolderInput />, onSelect: () => setDialog({ kind: 'move', node }) },

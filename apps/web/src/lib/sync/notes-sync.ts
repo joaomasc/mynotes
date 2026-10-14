@@ -1,5 +1,5 @@
 import { createStore, del, entries, get, set } from 'idb-keyval';
-import type { Note, NoteSummary, RichTextDoc } from '@mynotes/shared';
+import { asRichTextDoc, type Note, type NoteSummary, type RichTextDoc } from '@mynotes/shared';
 import { ApiError, NetworkError, isVersionConflict } from '../api/client';
 import { endpoints } from '../api/endpoints';
 import { syncStatus } from './status';
@@ -233,7 +233,8 @@ async function saveNow(noteId: string): Promise<void> {
     const summary = await endpoints.notes.update(noteId, {
       baseVersion: draft.baseVersion,
       title: draft.title,
-      content: draft.content,
+      // Drafts written by older versions may hold `{ type: 'doc' }` (no content).
+      content: asRichTextDoc(draft.content),
     });
     const outcome = await idbLock(noteId, async () => {
       const latest = await get<NoteDraft>(noteId, store);

@@ -29,8 +29,29 @@ export function isVersionConflict(err: unknown): err is ApiError & { details: { 
   return err instanceof ApiError && err.code === 'version_conflict';
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  title: 'título',
+  name: 'nome',
+  topicId: 'assunto',
+  parentId: 'assunto pai',
+  readingId: 'livro',
+  page: 'página',
+  content: 'conteúdo',
+  id: 'identificador',
+};
+
+/** User-facing message; validation errors name the first offending field. */
 export function errorMessage(err: unknown): string {
-  if (err instanceof ApiError || err instanceof NetworkError) return err.message;
+  if (err instanceof ApiError) {
+    const issues = err.code === 'validation_error' && Array.isArray(err.details) ? (err.details as { path?: string; message?: string }[]) : [];
+    const first = issues[0];
+    if (first?.message) {
+      const field = first.path ? FIELD_LABELS[first.path.split('.')[0]!] : undefined;
+      return `Não foi possível salvar${field ? ` (${field})` : ''}: ${first.message}`;
+    }
+    return err.message;
+  }
+  if (err instanceof NetworkError) return err.message;
   return 'Algo deu errado. Tente novamente.';
 }
 

@@ -141,9 +141,12 @@ export function Component() {
 
   useEffect(() => {
     if (params.get('log') === '1') {
-      setDialog({});
+      // Opened from a topic page: the session belongs to that topic.
+      const topicId = params.get('topicId');
+      setDialog(topicId ? { prefill: { topicId } } : {});
       const next = new URLSearchParams(params);
       next.delete('log');
+      next.delete('topicId');
       setParams(next, { replace: true });
     }
   }, [params, setParams]);

@@ -228,6 +228,22 @@
 .prose-note a[href^='mynotes:'] {
   @apply rounded bg-accent-soft px-1 no-underline;
 }
+/* "/" references are atoms rendered by a React node view (reference-node.tsx). */
+.prose-note .reference-node {
+  white-space: normal;
+}
+.prose-note .reference-chip {
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* #tags are decorations over plain text: still editable as text. */
+.prose-note .tag-chip {
+  @apply rounded-sm font-medium text-accent;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.prose-note .tag-chip:hover {
+  @apply underline decoration-accent/40 underline-offset-2;
+}
 .prose-note p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   @apply pointer-events-none float-left h-0 text-subtle;

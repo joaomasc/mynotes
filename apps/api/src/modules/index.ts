@@ -6,6 +6,7 @@ import { noteRoutes } from './notes/routes';
 import { overviewRoutes } from './overview/routes';
 import { planRoutes } from './plans/routes';
 import { readingRoutes } from './readings/routes';
+import { referenceRoutes } from './references/routes';
 import { studyRoutes } from './study/routes';
 import { topicRoutes } from './topics/routes';
 import { trashRoutes } from './trash/routes';
@@ -21,5 +22,6 @@ export const routeModules: RouteModule[] = [
   studyRoutes,
   knowledgeRoutes,
   overviewRoutes,
+  referenceRoutes,
   backupRoutes,
 ];

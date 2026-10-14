@@ -46,47 +46,6 @@ export const BACKUP_TABLES = {
       ...trashable,
     }),
   },
-  notes: {
-    hasUserId: true,
-    mergeByUpdatedAt: true,
-    row: z.object({
-      id: zId,
-      topic_id: zId.nullable(),
-      title: str(1000),
-      content: str(1_000_000),
-      excerpt: str(2000),
-      word_count: int,
-      body_text: str(1_000_000),
-      search_text: str(1_000_000),
-      sort_key: str(200),
-      ...versioned,
-      ...trashable,
-    }),
-  },
-  note_revisions: {
-    hasUserId: false,
-    parent: { column: 'note_id', table: 'notes' },
-    mergeByUpdatedAt: false,
-    row: z.object({
-      id: zId,
-      note_id: zId,
-      version: int,
-      title: str(1000),
-      content: str(1_000_000),
-      word_count: int,
-      created_at: ts,
-    }),
-  },
-  note_links: {
-    hasUserId: false,
-    parent: { column: 'note_id', table: 'notes' },
-    mergeByUpdatedAt: false,
-    row: z.object({
-      note_id: zId,
-      target_type: z.enum(['note', 'topic', 'document', 'reading', 'concept']),
-      target_id: zId,
-    }),
-  },
   documents: {
     hasUserId: true,
     mergeByUpdatedAt: true,
@@ -138,6 +97,53 @@ export const BACKUP_TABLES = {
       notes: str(20_000),
       search_text: str(50_000),
       ...versioned,
+    }),
+  },
+  notes: {
+    hasUserId: true,
+    mergeByUpdatedAt: true,
+    row: z.object({
+      id: zId,
+      topic_id: zId.nullable(),
+      title: str(1000),
+      content: str(1_000_000),
+      excerpt: str(2000),
+      word_count: int,
+      body_text: str(1_000_000),
+      search_text: str(1_000_000),
+      sort_key: str(200),
+      // Added in schema 0002; defaults keep older backups importable.
+      role: z.enum(['note', 'review', 'annotation']).default('note'),
+      reading_id: zId.nullable().default(null),
+      page: int.min(1).max(100_000).nullable().default(null),
+      annotation_type: z.enum(['summary', 'interpretation', 'critique', 'question', 'quote']).nullable().default(null),
+      quote: str(20_000).default(''),
+      ...versioned,
+      ...trashable,
+    }),
+  },
+  note_revisions: {
+    hasUserId: false,
+    parent: { column: 'note_id', table: 'notes' },
+    mergeByUpdatedAt: false,
+    row: z.object({
+      id: zId,
+      note_id: zId,
+      version: int,
+      title: str(1000),
+      content: str(1_000_000),
+      word_count: int,
+      created_at: ts,
+    }),
+  },
+  note_links: {
+    hasUserId: false,
+    parent: { column: 'note_id', table: 'notes' },
+    mergeByUpdatedAt: false,
+    row: z.object({
+      note_id: zId,
+      target_type: z.enum(['note', 'topic', 'document', 'reading', 'concept']),
+      target_id: zId,
     }),
   },
   reading_plans: {
@@ -259,6 +265,17 @@ export const BACKUP_TABLES = {
       updated_at: ts,
     }),
   },
+  view_layouts: {
+    hasUserId: true,
+    mergeByUpdatedAt: true,
+    primaryKey: 'view_key',
+    row: z.object({
+      view_key: str(200),
+      data: str(1_000_000),
+      version: int.min(1),
+      updated_at: ts,
+    }),
+  },
 } as const satisfies Record<
   string,
   {
@@ -271,7 +288,7 @@ export const BACKUP_TABLES = {
 >;
 
 export type BackupTableName = keyof typeof BACKUP_TABLES;
-/** Dependency order: parents before children. */
+/** Dependency order: parents before children (readings before the notes that annotate them). */
 export const BACKUP_TABLE_ORDER = Object.keys(BACKUP_TABLES) as BackupTableName[];
 
 export function backupColumns(table: BackupTableName): string[] {

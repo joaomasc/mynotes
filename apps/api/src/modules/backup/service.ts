@@ -156,7 +156,8 @@ function upsertStatement(
   const cols = backupColumns(table);
   const parent = parentOf(def);
   const pk = 'primaryKey' in def ? def.primaryKey : 'id';
-  const conflictTarget = table === 'settings' ? '(user_id, key)' : `(${pk})`;
+  // Tables keyed by a name instead of an id (settings, view_layouts) are unique per user.
+  const conflictTarget = pk === 'id' ? '(id)' : `(user_id, ${pk})`;
 
   const insertCols = def.hasUserId ? ['user_id', ...cols] : cols;
   const selectExprs = cols.map((col) => {
@@ -178,7 +179,7 @@ function upsertStatement(
   let conflict = 'ON CONFLICT DO NOTHING';
   const hasUpdatedAt = cols.includes('updated_at');
   if (def.mergeByUpdatedAt && hasUpdatedAt) {
-    const updatable = cols.filter((c) => c !== pk && c !== 'key');
+    const updatable = cols.filter((c) => c !== pk);
     const assignments = updatable.map((c) => {
       if (table === 'documents' && c === 'status') {
         return `status = CASE WHEN documents.storage_key IS NOT NULL AND documents.size_bytes = excluded.size_bytes
@@ -210,8 +211,9 @@ function upsertStatement(
 /** Rows that exist in the database but not in the backup (removed in replace mode). */
 function deleteMissingStatement(db: D1Database, table: BackupTableName, userId: string, jobId: string) {
   const def = BACKUP_TABLES[table];
-  if (table === 'settings') {
-    return stmt(db, `DELETE FROM settings WHERE user_id = ? AND key NOT IN (${IMPORTED('key')})`, userId, jobId, table);
+  if ('primaryKey' in def) {
+    const pk = def.primaryKey;
+    return stmt(db, `DELETE FROM ${table} WHERE user_id = ? AND ${pk} NOT IN (${IMPORTED(pk)})`, userId, jobId, table);
   }
   if (!('id' in def.row.shape)) {
     // Join tables: drop all owned rows; the backup re-inserts the ones it has.
@@ -271,6 +273,8 @@ export async function commitImport(
     for (const table of [...BACKUP_TABLE_ORDER].reverse()) statements.push(deleteMissingStatement(db, table, userId, jobId));
   }
   for (const table of BACKUP_TABLE_ORDER) statements.push(upsertStatement(db, table, userId, jobId, mode));
+  // Derived indexes (tags) are not part of the backup: rebuild them lazily.
+  statements.push(stmt(db, 'UPDATE notes SET index_version = 0 WHERE user_id = ?', userId));
   statements.push(
     stmt(
       db,

@@ -5,7 +5,7 @@ import { login, samplePdf } from './helpers';
 test.beforeEach(async ({ page }) => login(page));
 
 test('uploads a PDF with progress and reads it in the app', async ({ page }) => {
-  await page.goto('/library');
+  await page.goto('/library?view=docs');
   await page.getByRole('button', { name: 'Enviar', exact: true }).click();
   await page.locator('input[type=file]').setInputFiles({
     name: 'macroeconomia-e2e.pdf',
@@ -22,7 +22,7 @@ test('uploads a PDF with progress and reads it in the app', async ({ page }) => 
 });
 
 test('rejects files whose content does not match the type', async ({ page }) => {
-  await page.goto('/library');
+  await page.goto('/library?view=docs');
   await page.getByRole('button', { name: 'Enviar', exact: true }).click();
   await page.locator('input[type=file]').setInputFiles({ name: 'falso.pdf', mimeType: 'application/pdf', buffer: Buffer.from('<html>nope</html>') });
   await page.getByRole('button', { name: /Enviar \(1\)/ }).click();

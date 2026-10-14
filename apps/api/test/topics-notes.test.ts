@@ -215,6 +215,44 @@ describe('notes', () => {
     expect((await http.patch(`/notes/${note.id}`, { baseVersion: 1, content: { type: 'nope' } })).status).toBe(400);
   });
 
+  it('creates notes with the exact payloads of the web app (sidebar "+", topic page, Alt+N)', async () => {
+    // Sidebar "+" at the root: empty title, no topic.
+    const rootId = uuidv7();
+    const root = await http.post('/notes', { id: rootId, topicId: null, title: '' }, { 'Idempotency-Key': 'sidebar-root-0001' });
+    expect(root.status).toBe(201);
+    expect(root.body.data).toMatchObject({ id: rootId, topicId: null, title: '' });
+    // Sidebar "+" inside a topic: the note is created there.
+    const t = await topic('Macroeconomia');
+    const inTopic = await http.post('/notes', { id: uuidv7(), topicId: t.id, title: '' });
+    expect(inTopic.status).toBe(201);
+    expect(inTopic.body.data.topicId).toBe(t.id);
+    // Persisted and listed where expected.
+    expect((await http.get('/notes?topicId=none')).body.data.map((n: { id: string }) => n.id)).toEqual([rootId]);
+    expect((await http.get(`/notes?topicId=${t.id}`)).body.data).toHaveLength(1);
+    expect((await http.get(`/notes/${rootId}`)).status).toBe(200);
+  });
+
+  it('saves a title typed before the body (empty document serialized without content)', async () => {
+    // Regression: a note created from the sidebar "+" opens with the title
+    // focused; the first autosave sent `{ type: 'doc' }` and got 400.
+    const note = (await http.post('/notes', { id: uuidv7(), topicId: null, title: '' })).body.data;
+    const saved = await http.patch(`/notes/${note.id}`, { baseVersion: 1, title: 'Título primeiro', content: { type: 'doc' } });
+    expect(saved.status).toBe(200);
+    const stored = (await http.get(`/notes/${note.id}`)).body.data;
+    expect(stored.title).toBe('Título primeiro');
+    expect(stored.content).toEqual({ type: 'doc', content: [] });
+    // Structural validation still applies.
+    expect((await http.patch(`/notes/${note.id}`, { baseVersion: 2, content: { type: 'doc', content: 'x' } })).status).toBe(400);
+  });
+
+  it('explains validation errors in Portuguese', async () => {
+    const res = await http.post('/notes', { title: 42 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('validation_error');
+    expect(res.body.error.details[0].path).toBe('title');
+    expect(res.body.error.details[0].message).toMatch(/inválid|esperado/i);
+  });
+
   it('rejects references to topics that do not exist', async () => {
     const res = await http.post('/notes', { title: 'x', topicId: uuidv7() });
     expect(res.status).toBe(400);

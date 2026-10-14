@@ -168,6 +168,35 @@ export const PRIORITY_LABELS: Record<number, string> = {
   3: 'Alta',
 };
 
+/**
+ * What a note is: an ordinary note, the general review of a book ("Minha
+ * resenha") or an annotation of one of its pages. All are notes, so they share
+ * the editor, history, references, backlinks and search.
+ */
+export const NOTE_ROLES = ['note', 'review', 'annotation'] as const;
+export type NoteRole = (typeof NOTE_ROLES)[number];
+export const NOTE_ROLE_LABELS: Record<NoteRole, string> = {
+  note: 'Nota',
+  review: 'Resenha',
+  annotation: 'Anotação de leitura',
+};
+
+/** Optional classification of a page annotation. */
+export const ANNOTATION_TYPES = ['summary', 'interpretation', 'critique', 'question', 'quote'] as const;
+export type AnnotationType = (typeof ANNOTATION_TYPES)[number];
+export const ANNOTATION_TYPE_LABELS: Record<AnnotationType, string> = {
+  summary: 'Resumo',
+  interpretation: 'Interpretação',
+  critique: 'Crítica',
+  question: 'Dúvida',
+  quote: 'Citação',
+};
+
+export const TAG_MAX_LENGTH = 50;
+export const NOTE_TAGS_MAX = 100;
+/** Bump when the derived indexes of notes (tags) change, to reindex old rows. */
+export const NOTE_INDEX_VERSION = 1;
+
 /** Internal link scheme used inside note content: `mynotes:note/<id>`. */
 export const INTERNAL_LINK_PREFIX = 'mynotes:';
 export const INTERNAL_LINK_TYPES = ['note', 'topic', 'document', 'reading', 'concept'] as const;
