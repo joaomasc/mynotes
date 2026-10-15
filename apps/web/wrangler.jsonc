@@ -1,0 +1,12 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // Frontend on Cloudflare (static assets only, no Worker code).
+  // Build first with the production API URL: see the "deploy" script in package.json.
+  "name": "mynotes-web",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // Deep links (/notes/…, /readings/…) are served the app shell.
+    "not_found_handling": "single-page-application"
+  }
+}

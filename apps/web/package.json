@@ -9,6 +9,7 @@
     "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy": "node scripts/deploy-cloudflare.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs"

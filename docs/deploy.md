@@ -64,7 +64,17 @@ O workflow roda os testes, lista as migrações pendentes no D1 remoto e **recus
 
 Ordem segura para mudanças de esquema: migrações **aditivas** primeiro (novas tabelas/colunas com valor padrão), depois o código que as usa; remoções só numa migração posterior, quando nenhum código depender da estrutura antiga.
 
-## 2. GitHub Pages — frontend
+## 2. Frontend na Cloudflare (`mynotes-web`) — usado hoje
+
+O app publicado em `https://mynotes-web.joaomasc-dev.workers.dev` é um Worker só de arquivos estáticos (`apps/web/wrangler.jsonc`, com fallback de SPA para links diretos). Ele **não** é publicado pelo push: depois de `npx wrangler login`, rode
+
+```bash
+npm run deploy -w @mynotes/web   # build apontando para a API de produção + wrangler deploy
+```
+
+Publique a API antes quando o frontend depender de rotas novas (ex.: ditado → `/transcriptions`). Para outra URL de API: `MYNOTES_API_URL=https://… npm run deploy -w @mynotes/web`.
+
+## 2b. GitHub Pages — frontend (alternativa)
 
 1. *Settings › Pages › Build and deployment › Source*: **GitHub Actions**.
 2. *Settings › Secrets and variables › Actions › Variables* (variáveis públicas, não secrets):
