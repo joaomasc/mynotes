@@ -22,20 +22,28 @@ export interface TriggerStorage {
 
 const key = new PluginKey<{ dismissed: number | null; tags: DecorationSet }>('mynotes-triggers');
 
-// A trigger starts the text or follows a space/opening punctuation, so
-// "e/ou", "http://", "C#" and "#1" never open a prompt. "/" allows spaces
-// (titles have them) but not a leading one; "#" allows none.
-const OPEN = `(?:^|[\\s(\\[{"'“‘])`;
+// A trigger starts the text or follows a space, a line break, an inline node
+// (a reference chip) or opening punctuation, so "e/ou", "http://", "C#" and
+// "#1" never open a prompt. "/" allows spaces (titles have them) but not a
+// leading one; "#" allows none.
+const OPEN = `(?:^|[\\s(\\[{"'“‘\\ufffc])`;
 const SLASH = new RegExp(`${OPEN}/((?:[^\\s/\\ufffc][^/\\ufffc\\n]{0,59})?)$`, 'u');
 const HASH = new RegExp(`${OPEN}#((?:\\p{L}[\\p{L}\\p{N}_-]{0,49})?)$`, 'u');
+
+/** Line breaks (Shift+Enter, common in pasted text) read as "\n"; other inline nodes as one placeholder. */
+const leafText = (node: PMNode) => (node.type.name === 'hardBreak' ? '\n' : '￼');
 
 function findTrigger(state: EditorState): Trigger | null {
   const { selection } = state;
   if (!selection.empty) return null;
   const $pos = selection.$from;
   if (!$pos.parent.isTextblock || $pos.parent.type.spec.code) return null;
-  if ($pos.marks().some((m) => m.type.name === 'code' || m.type.name === 'link')) return null;
-  const before = $pos.parent.textBetween(Math.max(0, $pos.parentOffset - 80), $pos.parentOffset, '\n', '￼');
+  if ($pos.marks().some((m) => m.type.name === 'code')) return null;
+  // Inside a link's text, not just at its end: autolinked links extend over
+  // whatever is typed right after them, which must not disable the prompt.
+  const inLink = (marks: readonly { type: { name: string } }[] | undefined) => !!marks?.some((m) => m.type.name === 'link');
+  if (inLink($pos.marks()) && inLink($pos.nodeAfter?.marks)) return null;
+  const before = $pos.parent.textBetween(Math.max(0, $pos.parentOffset - 80), $pos.parentOffset, '\n', leafText);
   for (const [char, re] of [['/', SLASH], ['#', HASH]] as const) {
     const m = re.exec(before);
     if (!m) continue;

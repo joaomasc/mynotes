@@ -140,8 +140,9 @@ test('a book with PDF, page annotations and a review, kept across sessions', asy
   await login(phone);
   await phone.goto(bookUrl);
   await expect(phone.getByRole('radio', { name: /Anotações \(2\)/ })).toBeVisible({ timeout: 30_000 });
-  await expect(phone.getByRole('main').getByText('p. 1', { exact: true })).toBeVisible();
-  await expect(phone.getByRole('main').getByText('p. 3', { exact: true })).toBeVisible();
+  // The annotation items (the viewer may also offer a "p. 3" filter once it reopens on the saved page).
+  await expect(phone.getByRole('button', { name: /^p\. 1 / })).toBeVisible();
+  await expect(phone.getByRole('button', { name: /^p\. 3 / })).toBeVisible();
   await phone.getByRole('radio', { name: 'Minha resenha' }).click();
   await expect(phone.locator('.ProseMirror')).toContainText('Síntese do livro K');
   await other.close();
