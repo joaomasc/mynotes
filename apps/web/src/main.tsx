@@ -5,7 +5,7 @@ import { RouterProvider } from 'react-router/dom';
 import { Toaster } from 'sonner';
 import { ConfirmProvider } from '@/components/ui/dialog';
 import { onLogout, restoreSession } from '@/lib/auth/session';
-import { PERSIST_BUSTER, clearQueryCache, queryClient, queryPersister } from '@/lib/query';
+import { PERSIST_BUSTER, clearQueryCache, queryClient, queryPersister, shouldPersistQuery } from '@/lib/query';
 import { notesSync } from '@/lib/sync/notes-sync';
 import { router } from '@/app/router';
 import { registerServiceWorker } from '@/app/pwa';
@@ -44,10 +44,7 @@ createRoot(document.getElementById('root')!).render(
         persister: queryPersister,
         buster: PERSIST_BUSTER,
         maxAge: 7 * 24 * 3600_000,
-        dehydrateOptions: {
-          // Titles shown by references must be current (renames): never restored from disk.
-          shouldDehydrateQuery: (q) => q.state.status === 'success' && !String(q.queryKey[0]).startsWith('reference'),
-        },
+        dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
       }}
     >
       <ConfirmProvider>

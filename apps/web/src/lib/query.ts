@@ -38,7 +38,24 @@ export const queryPersister = createAsyncStoragePersister({
   key: 'mynotes-query-cache',
   throttleTime: 2000,
 });
-export const PERSIST_BUSTER = `v${APP_VERSION}`;
+/**
+ * Changing it discards every cache saved on devices. The suffix is bumped when
+ * what may be persisted changes ("2": binary file contents were saved by
+ * mistake and came back as plain objects, crashing the PDF viewer).
+ */
+export const PERSIST_BUSTER = `v${APP_VERSION}-2`;
+
+/**
+ * What is saved to disk for instant (and offline) startup: successful JSON
+ * data only. File contents (ArrayBuffer/Blob) do not survive serialization,
+ * and reference titles must always be current (renames).
+ */
+export function shouldPersistQuery(q: { queryKey: readonly unknown[]; state: { status: string; data: unknown } }): boolean {
+  const data = q.state.data;
+  if (q.state.status !== 'success') return false;
+  if (String(q.queryKey[0]).startsWith('reference') || q.queryKey[0] === 'document-file') return false;
+  return !(data instanceof ArrayBuffer || ArrayBuffer.isView(data) || (typeof Blob !== 'undefined' && data instanceof Blob));
+}
 
 export async function clearQueryCache(): Promise<void> {
   queryClient.clear();

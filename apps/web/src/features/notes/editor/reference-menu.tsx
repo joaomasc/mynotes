@@ -18,6 +18,8 @@ import { dismissTrigger, type Trigger, type TriggerStorage } from './triggers';
 
 type Item =
   | { kind: 'ref'; ref: Reference }
+  /** A book under "/pagina." before the page is typed: picking it asks for the page. */
+  | { kind: 'pick-page'; ref: Reference }
   | { kind: 'type'; def: RefKind }
   | { kind: 'create-topic'; title: string }
   | { kind: 'create-note'; title: string }
@@ -99,7 +101,11 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
     if (!parsed.kind && (!query || typedKind)) {
       for (const def of REF_KINDS) if (!typedKind || def.prefix.startsWith(typedKind)) out.push({ kind: 'type', def });
     }
-    for (const ref of refs.data ?? []) if (!(ref.type === 'note' && ref.id === noteId)) out.push({ kind: 'ref', ref });
+    const pageMode = parsed.kind?.prefix === 'pagina';
+    for (const ref of refs.data ?? []) {
+      if (ref.type === 'note' && ref.id === noteId) continue;
+      out.push(pageMode && ref.type === 'reading' && !parsed.page ? { kind: 'pick-page', ref } : { kind: 'ref', ref });
+    }
     const text = parsed.text;
     if (text.length >= 2) {
       const exact = (refs.data ?? []).some((r) => normalizeSearch(r.title) === normalizeSearch(text));
@@ -123,6 +129,10 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
         return;
       case 'type':
         editor.chain().focus().insertContentAt(range, `/${item.def.prefix}.`).run();
+        return;
+      case 'pick-page':
+        // Keeps the prompt open on this book, waiting for the page number.
+        editor.chain().focus().insertContentAt(range, `/pagina.${item.ref.title}, p. `).run();
         return;
       case 'tag':
         editor.chain().focus().insertContentAt(range, `#${item.tag} `).run();
@@ -230,9 +240,21 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
         icon = <EntityIcon type={r.type === 'note' && r.role !== 'note' ? 'reading' : r.type} />;
         title = refSyntax(r, r.type === 'reading' ? parsed.page : null);
         const path = topicPath(tree, r.type === 'topic' ? tree.byId.get(r.id)?.parentId : r.topicId).map((t) => t.title);
-        detail = r.type === 'note' && r.role === 'annotation' ? 'Anotação de leitura' : path.length ? path.join(' › ') : null;
+        detail =
+          r.type === 'note' && r.role === 'annotation'
+            ? 'Anotação de leitura'
+            : r.type === 'reading' && parsed.page
+              ? 'Página do livro (não precisa de anotação)'
+              : path.length
+                ? path.join(' › ')
+                : null;
         break;
       }
+      case 'pick-page':
+        icon = <EntityIcon type="reading" />;
+        title = `/pagina.${item.ref.title}`;
+        detail = 'Escolher a página — anotada ou não';
+        break;
       case 'type':
         icon = <span className="font-mono text-xs text-muted">/</span>;
         title = (
@@ -264,7 +286,7 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
     }
     return (
       <li
-        key={item.kind === 'ref' ? `${item.ref.type}:${item.ref.id}` : item.kind === 'type' ? item.def.prefix : item.kind === 'tag' ? `t:${item.tag}` : item.kind}
+        key={item.kind === 'ref' || item.kind === 'pick-page' ? `${item.kind}:${item.ref.type}:${item.ref.id}` : item.kind === 'type' ? item.def.prefix : item.kind === 'tag' ? `t:${item.tag}` : item.kind}
         id={`refmenu-${i}`}
         data-index={i}
         role="option"

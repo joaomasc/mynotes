@@ -37,6 +37,13 @@ describe('"/" and "#" prompts', () => {
     expect(typeIn(content, '/livro')).toMatchObject({ char: '/', query: 'livro' });
   });
 
+  it('keeps "/pagina." open over a long book title while the page is typed', () => {
+    const query = 'pagina.A ética protestante e o espírito do capitalismo, p. 12';
+    expect(typeIn(doc(p(t('Ver '))), `/${query}`)).toMatchObject({ char: '/', query });
+    // Without a kind, a long phrase after "/" is prose.
+    expect(typeIn(doc(p(t('Ver '))), '/ou seja isto é só uma frase comum e longa')).toBeNull();
+  });
+
   it('opens "#" after a line break', () => {
     expect(typeIn(doc(p(t('linha'), { type: 'hardBreak' })), '#tema')).toMatchObject({ char: '#', query: 'tema' });
   });

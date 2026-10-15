@@ -6,11 +6,25 @@ describe('"/" reference syntax', () => {
     expect(parseRefQuery('assunto.Mercantilismo')).toMatchObject({ kind: { types: 'topic' }, text: 'Mercantilismo', page: null });
     expect(parseRefQuery('livro.O Capital#p-125')).toMatchObject({ kind: { types: 'reading' }, text: 'O Capital', page: 125 });
     expect(parseRefQuery('leitura.O Capital#capitulo')).toMatchObject({ kind: { prefix: 'livro' }, text: 'O Capital#capitulo' });
-    expect(parseRefQuery('pagina.O Capital')).toMatchObject({ kind: { types: 'annotation' }, text: 'O Capital' });
-    expect(parseRefQuery('Página.capital')).toMatchObject({ kind: { types: 'annotation' } });
+    expect(parseRefQuery('pagina.O Capital')).toMatchObject({ kind: { prefix: 'pagina', types: 'reading,annotation' }, text: 'O Capital', page: null });
+    expect(parseRefQuery('Página.capital')).toMatchObject({ kind: { prefix: 'pagina' } });
+    expect(parseRefQuery('anotacao.capital')).toMatchObject({ kind: { prefix: 'pagina' } });
     // Unknown prefixes and plain text search everything.
     expect(parseRefQuery('e.g. inflação')).toMatchObject({ kind: null, text: 'e.g. inflação' });
     expect(parseRefQuery('assunto.#5')).toMatchObject({ kind: { types: 'topic' }, text: '#5', page: null });
+  });
+
+  it('cites any page of a book, annotated or not, while it is being typed', () => {
+    // The menu writes "/pagina.<book>, p. " and waits for the number.
+    expect(parseRefQuery('pagina.O Capital, p. ')).toMatchObject({ text: 'O Capital', page: null });
+    expect(parseRefQuery('pagina.O Capital, p. 125')).toMatchObject({ text: 'O Capital', page: 125 });
+    expect(parseRefQuery('pagina.O Capital, pág. 7')).toMatchObject({ text: 'O Capital', page: 7 });
+    expect(parseRefQuery('pagina.O Capital 125')).toMatchObject({ text: 'O Capital', page: 125 });
+    expect(parseRefQuery('livro.O Capital, p. 125')).toMatchObject({ text: 'O Capital', page: 125 });
+    // Titles ending in numbers stay whole unless a page marker says otherwise.
+    expect(parseRefQuery('livro.1984')).toMatchObject({ text: '1984', page: null });
+    expect(parseRefQuery('livro.Fausto 2')).toMatchObject({ text: 'Fausto 2', page: null });
+    expect(parseRefQuery('assunto.Capítulo, p. 3')).toMatchObject({ text: 'Capítulo, p. 3', page: null });
   });
 
   it('reads back as the visible syntax and opens the right place', () => {

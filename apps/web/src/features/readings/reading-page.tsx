@@ -11,6 +11,7 @@ import {
   READING_STATUS_LABELS,
   uuidv7,
   type AnnotationType,
+  type Backlink,
   type DocumentMeta,
   type Note,
   type NoteSummary,
@@ -276,9 +277,12 @@ function AnnotationsPanel({
   setActiveId,
   onJump,
   hasPdf,
+  mentions,
 }: {
   reading: Reading;
   annotations: NoteSummary[];
+  /** Notes citing this book, with the pages they cite. */
+  mentions: Backlink[];
   loading: boolean;
   page: number | null;
   selection: PdfSelection | null;
@@ -352,6 +356,7 @@ function AnnotationsPanel({
         )}
       </div>
       {selection && <p className="line-clamp-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted italic">“{selection.text}”</p>}
+      <PageMentions page={targetPage} mentions={mentions} />
 
       {loading ? (
         <Spinner className="mx-auto my-6 size-5" />
@@ -395,6 +400,28 @@ function AnnotationsPanel({
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Notes that cite the page being read (`/pagina.Livro, p. 125`), even without an annotation on it. */
+function PageMentions({ page, mentions }: { page: number | null; mentions: Backlink[] }) {
+  const here = page ? mentions.filter((m) => m.citedPages?.includes(page)) : [];
+  if (here.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-reading/30 bg-reading/5 px-3 py-2 text-sm">
+      <p className="mb-1 text-xs font-medium text-reading">
+        {here.length === 1 ? 'Uma nota cita' : `${here.length} notas citam`} a p. {page}
+      </p>
+      <ul className="space-y-0.5">
+        {here.map((m) => (
+          <li key={m.noteId}>
+            <Link to={`/notes/${m.noteId}`} className="block truncate hover:text-accent hover:underline">
+              {m.title || m.excerpt || 'Sem título'}
+            </Link>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -483,7 +510,11 @@ function AboutPanel({ reading, doc }: { reading: Reading; doc: DocumentMeta | un
       <RelationsPanel type="reading" id={reading.id} title={reading.title} />
       <div>
         <h3 className="mb-2 text-[13px] font-semibold text-muted">Citado em</h3>
-        <BacklinkList items={back.data} empty="Nenhuma nota cita este livro ainda. Em uma nota, digite /livro." />
+        <BacklinkList
+          items={back.data}
+          empty="Nenhuma nota cita este livro ainda. Em uma nota, digite /livro ou /pagina."
+          pageLink={(page) => `/readings/${reading.id}?page=${page}`}
+        />
       </div>
       {reading.notes && (
         <div>
@@ -536,7 +567,11 @@ export function Component() {
     const page = params.get('page');
     const annotation = params.get('annotation');
     if (!page && !annotation && !params.get('section')) return;
-    if (page) setGoto({ page: Number(page), seq: Date.now() });
+    if (page) {
+      setGoto({ page: Number(page), seq: Date.now() });
+      // The page's annotations and the notes citing it are listed there.
+      setTab('annotations');
+    }
     if (annotation) {
       setActiveId(annotation);
       setTab('annotations');
@@ -549,11 +584,15 @@ export function Component() {
     () => [...(annotations.data?.data ?? [])].sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.createdAt.localeCompare(b.createdAt)),
     [annotations.data],
   );
+  // Notes citing this book (and which pages): shared with "Sobre › Citado em".
+  const mentions = useQuery({ queryKey: qk.backlinks('reading', id), queryFn: () => endpoints.notes.backlinks('reading', id), enabled: !!r });
+  /** Marks on the PDF pages: annotations plus notes that cite the page. */
   const markers = useMemo(() => {
     const m = new Map<number, number>();
     for (const a of sorted) if (a.page) m.set(a.page, (m.get(a.page) ?? 0) + 1);
+    for (const b of mentions.data ?? []) for (const p of b.citedPages ?? []) m.set(p, (m.get(p) ?? 0) + 1);
     return m;
-  }, [sorted]);
+  }, [sorted, mentions.data]);
 
   // Remember the page being read (the last page shown for a few seconds).
   const saving = useRef(false);
@@ -648,6 +687,7 @@ export function Component() {
           setActiveId={setActiveId}
           onJump={jump}
           hasPdf={hasPdf}
+          mentions={mentions.data ?? []}
         />
       )}
       {tab === 'review' && <ReviewPanel reading={r} />}

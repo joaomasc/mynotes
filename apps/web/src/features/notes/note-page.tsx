@@ -192,7 +192,16 @@ export function backlinkLabel(b: Pick<Backlink, 'role' | 'title' | 'readingTitle
   return b.title || 'Sem título';
 }
 
-export function BacklinkList({ items, empty }: { items: Backlink[] | undefined; empty: string }) {
+export function BacklinkList({
+  items,
+  empty,
+  pageLink,
+}: {
+  items: Backlink[] | undefined;
+  empty: string;
+  /** For a book's backlinks: where each cited page leads. */
+  pageLink?: (page: number) => string;
+}) {
   if (!items?.length) return <p className="text-xs text-muted">{empty}</p>;
   return (
     <ul className="space-y-1">
@@ -205,6 +214,15 @@ export function BacklinkList({ items, empty }: { items: Backlink[] | undefined; 
             <span className="block truncate">{backlinkLabel(b)}</span>
             {b.excerpt && <span className="block truncate text-xs text-muted">{b.excerpt}</span>}
           </Link>
+          {pageLink && !!b.citedPages?.length && (
+            <span className="flex flex-wrap gap-1 px-1.5 pb-1">
+              {b.citedPages.map((p) => (
+                <Link key={p} to={pageLink(p)} className="rounded-md bg-reading/10 px-1.5 py-0.5 text-[11px] font-medium text-reading hover:underline">
+                  p. {p}
+                </Link>
+              ))}
+            </span>
+          )}
         </li>
       ))}
     </ul>

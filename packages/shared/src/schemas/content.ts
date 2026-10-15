@@ -183,6 +183,8 @@ export const zBacklink = z.object({
   page: z.number().int().nullable(),
   excerpt: z.string(),
   updatedAt: zDateTime,
+  /** Backlinks of a book: the pages the note cites (`/pagina.O Capital, p. 125`), in order. */
+  citedPages: z.array(z.number().int()).optional(),
 });
 
 export const zTagCount = z.object({ tag: z.string(), count: z.number().int() });

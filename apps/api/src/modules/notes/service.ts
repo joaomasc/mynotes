@@ -1,5 +1,6 @@
 import {
   EMPTY_DOC,
+  INTERNAL_LINK_PREFIX,
   NOTE_CONTENT_MAX_BYTES,
   NOTE_INDEX_VERSION,
   NOTE_REVISIONS_KEEP,
@@ -518,9 +519,11 @@ export function toBacklink(r: Row): Backlink {
 
 /** Notes (including book reviews and page annotations) whose content references the item. */
 export async function backlinks(db: D1Database, userId: string, type: string, id: string): Promise<Backlink[]> {
+  // For a book, also the pages each note cites (references store `mynotes:reading/<id>/p/<page>`).
+  const book = type === 'reading';
   const rows = await all(
     db,
-    `SELECT n.id, n.title, n.topic_id, n.role, n.reading_id, n.page, n.excerpt, n.updated_at, r.title AS reading_title
+    `SELECT n.id, n.title, n.topic_id, n.role, n.reading_id, n.page, n.excerpt, n.updated_at, r.title AS reading_title${book ? ', n.content' : ''}
        FROM note_links l JOIN notes n ON n.id = l.note_id
        LEFT JOIN readings r ON r.id = n.reading_id AND r.user_id = n.user_id
       WHERE l.target_type = ? AND l.target_id = ? AND n.user_id = ? AND n.deleted_at IS NULL
@@ -529,7 +532,12 @@ export async function backlinks(db: D1Database, userId: string, type: string, id
     id,
     userId,
   );
-  return rows.map(toBacklink);
+  if (!book) return rows.map(toBacklink);
+  const anchor = new RegExp(`${INTERNAL_LINK_PREFIX}reading/${id}/p/(\\d{1,6})`, 'g');
+  return rows.map((r) => {
+    const pages = [...new Set([...str(r.content).matchAll(anchor)].map((m) => Number(m[1])))].sort((a, b) => a - b);
+    return { ...toBacklink(r), citedPages: pages };
+  });
 }
 
 /** Tags in use, most used first; `q` keeps tags containing it (prefix matches first). */

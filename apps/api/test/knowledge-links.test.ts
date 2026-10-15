@@ -83,6 +83,26 @@ describe('references', () => {
     expect(resolved[0].exists).toBe(true);
   });
 
+  it("tell a book which of its pages each note cites, annotated or not", async () => {
+    const book = (await http.post('/readings', { title: 'O Capital' })).body.data;
+    const other = (await http.post('/readings', { title: 'Grundrisse' })).body.data;
+    const summary = await note(
+      'Resumo do capítulo 24',
+      doc(text('Ver '), ref('reading', book.id, 'O Capital, p. 125', 125), text(' e '), ref('reading', book.id, 'O Capital, p. 30', 30),
+        text(' de novo '), ref('reading', book.id, 'O Capital, p. 125', 125), text(' e '), ref('reading', other.id, 'Grundrisse, p. 9', 9)),
+    );
+    const whole = await note('Sobre o livro', doc(ref('reading', book.id, 'O Capital')));
+    const back = (await http.get(`/backlinks/reading/${book.id}`)).body.data;
+    const byNote = (id: string) => back.find((b: { noteId: string }) => b.noteId === id);
+    expect(byNote(summary.id).citedPages).toEqual([30, 125]);
+    expect(byNote(whole.id).citedPages).toEqual([]);
+    expect((await http.get(`/backlinks/reading/${other.id}`)).body.data[0].citedPages).toEqual([9]);
+    // Other kinds of backlinks carry no pages.
+    const t = await topic('Economia');
+    await note('Cita assunto', doc(ref('topic', t.id, 'Economia')));
+    expect((await http.get(`/backlinks/topic/${t.id}`)).body.data[0].citedPages).toBeUndefined();
+  });
+
   it('accept page anchors for books and reject non-internal targets', async () => {
     const book = (await http.post('/readings', { title: 'O Capital', author: 'Marx' })).body.data;
     const n = await note('Leitura', doc(ref('reading', book.id, 'O Capital', 125), ref('topic', 'javascript:alert(1)' as never, 'x')));

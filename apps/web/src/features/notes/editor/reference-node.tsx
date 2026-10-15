@@ -78,7 +78,8 @@ function ReferenceView({ node, editor, getPos, updateAttributes, deleteNode, sel
         if (broken) return; // the repair menu opens instead
         e.preventDefault();
         e.stopPropagation();
-        if (data && link) void navigate(referencePath(data, link.page));
+        // Before the item is loaded, the link alone is enough (an annotation then opens as a note).
+        if (link) void navigate(referencePath(data ?? { type: link.type, id: link.id, role: null, readingId: null, page: null }, link.page));
       }}
       className={cn(
         'reference-chip cursor-pointer rounded px-1 py-px font-medium no-underline',

@@ -53,14 +53,14 @@ export function useReference(type: GraphEntityType | undefined, id: string | und
 
 /**
  * Readable prefixes typed after `/` to narrow the search, e.g.
- * `/assunto.Mercantilismo`, `/livro.O Capital#125`, `/pagina.O Capital`.
- * They only filter: what is stored is the target's id.
+ * `/assunto.Mercantilismo`, `/livro.O Capital`, `/pagina.O Capital, p. 125`.
+ * They only filter: what is stored is the target's id (and the page).
  */
 export const REF_KINDS = [
   { prefix: 'assunto', label: 'Assunto', types: 'topic', hint: 'Assunto ou subassunto' },
   { prefix: 'nota', label: 'Nota', types: 'note', hint: 'Notas e resenhas' },
-  { prefix: 'livro', label: 'Livro ou leitura', types: 'reading', hint: 'Use #125 para citar uma página' },
-  { prefix: 'pagina', label: 'Página anotada', types: 'annotation', hint: 'Anotações feitas nos livros' },
+  { prefix: 'livro', label: 'Livro ou leitura', types: 'reading', hint: 'O livro todo (com “, p. 125”, uma página)' },
+  { prefix: 'pagina', label: 'Página de livro', types: 'reading,annotation', hint: 'Qualquer página, anotada ou não' },
   { prefix: 'documento', label: 'Documento', types: 'document', hint: 'PDFs e arquivos da biblioteca' },
   { prefix: 'conceito', label: 'Conceito', types: 'concept', hint: 'Conceitos dos assuntos' },
 ] as const;
@@ -89,12 +89,18 @@ export function parseRefQuery(query: string): ParsedRefQuery {
     }
   }
   let page: number | null = null;
-  const pageMatch = /(?:#\s*p?-?|\bp\.\s*)(\d{1,6})\s*$/i.exec(rest);
-  if (pageMatch && (!kind || kind.types === 'reading' || kind.types === 'annotation')) {
+  const pages = !kind || kind.prefix === 'livro' || kind.prefix === 'pagina';
+  // "#125", "p. 125", "pág. 125" — and, after "/pagina.", also a bare "O Capital 125".
+  const marker = kind?.prefix === 'pagina' ? /(?:#\s*p?-?|\bp[aá]?g?\.?\s*|\s)(\d{1,6})\s*$/i : /(?:#\s*p?-?|\bp[aá]?g?\.\s*)(\d{1,6})\s*$/i;
+  const pageMatch = pages ? marker.exec(rest) : null;
+  if (pageMatch) {
     page = Number(pageMatch[1]) || null;
     rest = rest.slice(0, pageMatch.index);
+  } else if (pages) {
+    // Page still being typed ("O Capital, p. "): search by the title meanwhile.
+    rest = rest.replace(/(?:,\s*|\s+)(?:p[aá]?g?\.?|#)\s*$/i, '');
   }
-  return { kind, text: rest.trim(), page };
+  return { kind, text: rest.replace(/[\s,]+$/, '').trim(), page };
 }
 
 type RefLike = Pick<Reference, 'type' | 'title' | 'role' | 'readingTitle' | 'page' | 'materialType'>;

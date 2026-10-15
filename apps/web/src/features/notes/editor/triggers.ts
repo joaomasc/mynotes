@@ -27,7 +27,9 @@ const key = new PluginKey<{ dismissed: number | null; tags: DecorationSet }>('my
 // "#1" never open a prompt. "/" allows spaces (titles have them) but not a
 // leading one; "#" allows none.
 const OPEN = `(?:^|[\\s(\\[{"'“‘\\ufffc])`;
-const SLASH = new RegExp(`${OPEN}/((?:[^\\s/\\ufffc][^/\\ufffc\\n]{0,59})?)$`, 'u');
+const SLASH = new RegExp(`${OPEN}/((?:[^\\s/\\ufffc][^/\\ufffc\\n]{0,139})?)$`, 'u');
+/** "/pagina.…", "/livro.…": an explicit kind, so even a long title is a search, not prose. */
+const KIND_PREFIX = /^\p{L}+\./u;
 const HASH = new RegExp(`${OPEN}#((?:\\p{L}[\\p{L}\\p{N}_-]{0,49})?)$`, 'u');
 
 /** Line breaks (Shift+Enter, common in pasted text) read as "\n"; other inline nodes as one placeholder. */
@@ -43,13 +45,13 @@ function findTrigger(state: EditorState): Trigger | null {
   // whatever is typed right after them, which must not disable the prompt.
   const inLink = (marks: readonly { type: { name: string } }[] | undefined) => !!marks?.some((m) => m.type.name === 'link');
   if (inLink($pos.marks()) && inLink($pos.nodeAfter?.marks)) return null;
-  const before = $pos.parent.textBetween(Math.max(0, $pos.parentOffset - 80), $pos.parentOffset, '\n', leafText);
+  const before = $pos.parent.textBetween(Math.max(0, $pos.parentOffset - 160), $pos.parentOffset, '\n', leafText);
   for (const [char, re] of [['/', SLASH], ['#', HASH]] as const) {
     const m = re.exec(before);
     if (!m) continue;
     const query = m[1] ?? '';
-    // Long "/" phrases are prose, not a search.
-    if (char === '/' && query.split(' ').length > 7) return null;
+    // Long "/" phrases are prose, not a search (unless they name a kind).
+    if (char === '/' && !KIND_PREFIX.test(query) && (query.split(' ').length > 7 || query.length > 60)) return null;
     return { char, query, from: selection.from - query.length - 1, to: selection.from };
   }
   return null;

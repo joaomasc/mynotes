@@ -137,7 +137,7 @@ function PdfPage({ doc, number, scale, baseSize, onVisible, register, marks }: P
       className="pdf-page relative mx-auto bg-white shadow-card"
       style={{ width: size.width, height: size.height }}
       data-page={number}
-      aria-label={`Página ${number}${marks ? `, ${marks} anotação(ões)` : ''}`}
+      aria-label={`Página ${number}${marks ? `, ${marks} marcação(ões)` : ''}`}
       role="img"
     >
       <canvas ref={canvas} className="block" />
