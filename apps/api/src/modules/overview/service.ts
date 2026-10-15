@@ -55,7 +55,8 @@ export async function buildGraph(
   // Hierarchy is always needed to scope by topic and draw structural edges.
   const statements = types.map((type) => {
     const src = GRAPH_SOURCES[type];
-    const extra = type === 'note' ? ', role, reading_id, page' : '';
+    const extra =
+      type === 'note' ? ', role, reading_id, page, (SELECT r.title FROM readings r WHERE r.id = notes.reading_id) AS reading_title' : '';
     let sql = `SELECT id, ${src.title} AS title, ${src.topic} AS topic_id${extra} FROM ${src.table} WHERE user_id = ?`;
     const binds: Bindable[] = [userId];
     if (src.trashable) sql += ' AND deleted_at IS NULL';
@@ -94,7 +95,15 @@ export async function buildGraph(
     for (const r of rows.slice(0, GRAPH_LIMIT_PER_TYPE)) {
       const key = entityKey(type, str(r.id));
       const role = type === 'note' ? ((strOrNull(r.role) ?? 'note') as NoteRole) : null;
-      const fallback = role === 'review' ? 'Resenha' : role === 'annotation' ? (r.page ? `p. ${num(r.page)}` : 'Anotação') : 'Sem título';
+      // Untitled reviews and annotations are named after their book ("O Capital, p. 12").
+      const book = strOrNull(r.reading_title);
+      const page = r.page ? `p. ${num(r.page)}` : null;
+      const fallback =
+        role === 'review'
+          ? book ? `Resenha: ${book}` : 'Resenha'
+          : role === 'annotation'
+            ? [book, page].filter(Boolean).join(', ') || 'Anotação'
+            : 'Sem título';
       nodes.set(key, {
         key,
         type,
@@ -106,6 +115,25 @@ export async function buildGraph(
       if (role && role !== 'note' && r.reading_id) annotates.push({ note: key, reading: entityKey('reading', str(r.reading_id)) });
     }
   });
+
+  // A topic's map also shows the books its annotations and reviews belong to,
+  // even when the book is filed under another topic (otherwise the link is lost).
+  if (q.topicId && types.includes('reading')) {
+    const missing = [...new Set(annotates.map((a) => a.reading))].filter((k) => !nodes.has(k)).map((k) => k.slice('reading:'.length));
+    for (let i = 0; i < missing.length; i += 90) {
+      const ids = missing.slice(i, i + 90);
+      const rows = await all(
+        db,
+        `SELECT id, title, topic_id FROM readings WHERE user_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
+        userId,
+        ...ids,
+      );
+      for (const r of rows) {
+        const key = entityKey('reading', str(r.id));
+        nodes.set(key, { key, type: 'reading', entityId: str(r.id), label: str(r.title) || 'Sem título', topicId: strOrNull(r.topic_id), role: null });
+      }
+    }
+  }
 
   const edges = new Map<string, GraphEdge>();
   const addEdge = (e: Omit<GraphEdge, 'key'>) => {

@@ -37,7 +37,9 @@ import { useTopics, type TopicNode } from './use-topics';
 /**
  * Mind map generated from a topic: its subtopics are the branches (the
  * official hierarchy), notes/books hang from their topic, and explicit
- * relations are drawn as conceptual links. Three things are kept apart:
+ * relations are drawn as conceptual links. Book annotations and reviews
+ * appear once moved to a topic, tied to their book (drawn under them when the
+ * book is filed elsewhere). Three things are kept apart:
  *  - hierarchy: topics.parent_id, changed only with "Mover para…";
  *  - conceptual relations: the relations table;
  *  - presentation: positions and collapsed branches in view_layouts.
@@ -51,6 +53,8 @@ type MNodeData = {
   collapsed: boolean;
   connectable: boolean;
   onToggle: () => void;
+  /** Opens the item (double click). */
+  onOpen: () => void;
 };
 type MNode = Node<MNodeData, 'mind'>;
 
@@ -59,6 +63,11 @@ const MindNode = memo(function MindNode({ data, selected }: NodeProps<MNode>) {
   const handle = data.connectable ? '!size-2.5 !border-surface !bg-accent' : '!pointer-events-none !opacity-0';
   return (
     <div
+      onDoubleClick={(e) => {
+        // Handled here, and kept from zooming the map.
+        e.stopPropagation();
+        data.onOpen();
+      }}
       className={cn(
         'flex max-w-60 items-center gap-1.5 rounded-xl border-2 bg-surface px-3 py-1.5 shadow-card',
         data.root ? 'text-base font-semibold' : data.type === 'topic' ? 'text-sm font-medium' : 'rounded-full border px-2.5 py-1 text-xs',
@@ -94,6 +103,10 @@ interface Branch {
   node: GraphNode;
   children: Branch[];
 }
+
+/** Map node id of a book drawn under one of its annotations (the same book may hang from several). */
+const bookUnder = (bookKey: string, noteKey: string) => `${bookKey}@${noteKey}`;
+const isBookUnder = (id: string) => id.includes('@');
 
 const GAP_X = 250;
 const GAP_Y = 52;
@@ -134,16 +147,33 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
   const { tree } = useTopics();
 
   const byKey = useMemo(() => new Map(graph.nodes.map((n) => [n.key, n])), [graph]);
+  /** Graph node behind a map node id (a book drawn under an annotation shares the book's node). */
+  const nodeOf = useCallback((id: string) => byKey.get(id.split('@')[0]!), [byKey]);
 
   // Branches: subtopics (official hierarchy) and, optionally, the items of each topic.
   const root = useMemo<Branch>(() => {
     const items = new Map<string, GraphNode[]>();
+    // Book of each annotation/review (reviews and page notes start without a
+    // topic and only show up here once the user files them under one).
+    const bookOf = new Map(graph.edges.filter((e) => e.kind === 'annotates').map((e) => [e.source, e.target]));
     if (showItems) {
       for (const n of graph.nodes) {
-        if (n.type === 'topic' || !n.topicId || (n.type === 'note' && n.role !== 'note')) continue;
+        if (n.type === 'topic' || !n.topicId) continue;
         items.set(n.topicId, [...(items.get(n.topicId) ?? []), n]);
       }
     }
+    // Books already in this map get a dashed link instead of a copy.
+    const inMap = new Set<string>();
+    const collect = (t: TopicNode) => {
+      for (const n of items.get(t.id) ?? []) inMap.add(n.key);
+      t.children.forEach(collect);
+    };
+    collect(topic);
+    const leaf = (n: GraphNode): Branch => {
+      const book = bookOf.get(n.key);
+      const bookNode = book && !inMap.has(book) ? byKey.get(book) : undefined;
+      return { key: n.key, node: n, children: bookNode ? [{ key: bookUnder(bookNode.key, n.key), node: bookNode, children: [] }] : [] };
+    };
     const build = (t: TopicNode): Branch => {
       const k = `topic:${t.id}`;
       const node = byKey.get(k) ?? { key: k, type: 'topic' as const, entityId: t.id, label: t.title, topicId: t.parentId, role: null };
@@ -152,7 +182,7 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
         node: { ...node, label: t.title },
         children: [
           ...t.children.map(build),
-          ...(items.get(t.id) ?? []).sort((a, b) => a.label.localeCompare(b.label)).map((n) => ({ key: n.key, node: n, children: [] })),
+          ...(items.get(t.id) ?? []).sort((a, b) => a.label.localeCompare(b.label)).map(leaf),
         ],
       };
     };
@@ -211,11 +241,20 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
     [saveSoon],
   );
 
+  const open = useCallback(
+    (g: GraphNode) => void navigate(referencePath({ type: g.type, id: g.entityId, role: g.role, readingId: null, page: null })),
+    [navigate],
+  );
+
   const [nodes, setNodes] = useState<MNode[]>([]);
   useEffect(() => {
-    setNodes(
-      visible.map(({ branch }) => ({
+    // Keeps each node's measured size: React Flow hides unmeasured nodes for a
+    // moment, which made the second click of a double click hit the background.
+    setNodes((prev) => {
+      const measured = new Map(prev.map((n) => [n.id, n.measured]));
+      return visible.map(({ branch }) => ({
         id: branch.key,
+        measured: measured.get(branch.key),
         type: 'mind',
         position: positions[branch.key] ?? auto.get(branch.key) ?? { x: 0, y: 0 },
         selected: branch.key === selected,
@@ -227,10 +266,11 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
           collapsed: collapsed.has(branch.key),
           connectable: connectMode,
           onToggle: () => toggle(branch.key),
+          onOpen: () => open(branch.node),
         },
-      })),
-    );
-  }, [visible, positions, auto, selected, root.key, collapsed, connectMode, toggle]);
+      }));
+    });
+  }, [visible, positions, auto, selected, root.key, collapsed, connectMode, toggle, open]);
 
   const shown = new Set(visible.map((v) => v.branch.key));
   const edges: Edge[] = [
@@ -241,8 +281,22 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
         source: v.parent!,
         target: v.branch.key,
         type: 'smoothstep',
-        style: { stroke: 'var(--border-strong)', strokeWidth: v.branch.node.type === 'topic' ? 2 : 1 },
+        style: isBookUnder(v.branch.key)
+          ? { stroke: 'var(--c-reading)', strokeWidth: 1, strokeDasharray: '4 3' }
+          : { stroke: 'var(--border-strong)', strokeWidth: v.branch.node.type === 'topic' ? 2 : 1 },
       })),
+    // Annotation → its book, when both are in the map.
+    ...(showItems
+      ? graph.edges
+          .filter((e) => e.kind === 'annotates' && shown.has(e.source) && shown.has(e.target))
+          .map((e) => ({
+            id: e.key,
+            source: e.source,
+            target: e.target,
+            style: { stroke: 'var(--c-reading)', strokeWidth: 1, strokeDasharray: '4 3' },
+            markerEnd: { type: MarkerType.ArrowClosed, color: 'var(--c-reading)' },
+          }))
+      : []),
     ...graph.edges
       .filter((e) => (e.relationId || (showRefs && e.kind === 'links_to')) && shown.has(e.source) && shown.has(e.target))
       .map((e) => ({
@@ -295,17 +349,13 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
         }}
         nodesConnectable={connectMode}
         onConnect={(c: Connection) => {
-          const source = byKey.get(c.source);
-          const target = byKey.get(c.target);
+          const source = nodeOf(c.source);
+          const target = nodeOf(c.target);
           if (source && target && source.key !== target.key) setPair({ source, target });
         }}
         onNodeClick={(_e, n) => {
           setSelected(n.id);
           setSelectedEdge(null);
-        }}
-        onNodeDoubleClick={(_e, n) => {
-          const g = byKey.get(n.id);
-          if (g) void navigate(referencePath({ type: g.type, id: g.entityId, role: g.role, readingId: null, page: null }));
         }}
         onEdgeClick={(_e, edge) => setSelectedEdge(graph.edges.find((x) => x.key === edge.id) ?? null)}
         onPaneClick={() => {

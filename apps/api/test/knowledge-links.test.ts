@@ -182,10 +182,35 @@ describe('graph', () => {
     expect(kinds).toContain(`parent topic:${eco.id} topic:${macro.id}`);
     expect(kinds).toContain(`annotates note:${ann.id} reading:${book.id}`);
     expect(kinds).toContain(`links_to note:${ann.id} topic:${macro.id}`);
-    expect(g.nodes.find((n: { key: string }) => n.key === `note:${ann.id}`)).toMatchObject({ role: 'annotation', label: 'p. 7' });
+    expect(g.nodes.find((n: { key: string }) => n.key === `note:${ann.id}`)).toMatchObject({ role: 'annotation', label: 'O Capital, p. 7' });
     // Scoped to a topic, annotations of the topic's books are included.
     const scoped = (await http.get(`/graph?topicId=${eco.id}`)).body.data;
     expect(scoped.nodes.map((n: { key: string }) => n.key)).toContain(`note:${ann.id}`);
+  });
+
+  it("brings a filed annotation's book into another topic's map, linked to it", async () => {
+    const history = await topic('História');
+    const marx = await topic('Marx');
+    const capital = await topic('Capital', marx.id);
+    const book = (await http.post('/readings', { title: 'O 18 de Brumário', topicId: history.id })).body.data;
+    const ann = await note('', doc(text('Bonapartismo')), { role: 'annotation', readingId: book.id, page: 12 });
+    const review = await note('', doc(text('Síntese')), { role: 'review', readingId: book.id });
+    const loose = await note('', doc(text('Não arquivada')), { role: 'annotation', readingId: book.id, page: 40 });
+    // Opened as a note and filed under a subtopic of another topic.
+    expect((await http.patch(`/notes/${ann.id}`, { baseVersion: ann.version, topicId: capital.id })).status).toBe(200);
+    expect((await http.patch(`/notes/${review.id}`, { baseVersion: review.version, topicId: marx.id })).status).toBe(200);
+
+    const g = (await http.get(`/graph?topicId=${marx.id}`)).body.data;
+    const node = (key: string) => g.nodes.find((n: { key: string }) => n.key === key);
+    expect(node(`note:${ann.id}`)).toMatchObject({ topicId: capital.id, role: 'annotation', label: 'O 18 de Brumário, p. 12' });
+    expect(node(`note:${review.id}`)).toMatchObject({ topicId: marx.id, role: 'review', label: 'Resenha: O 18 de Brumário' });
+    // The book is filed elsewhere but comes along, so the link is not lost.
+    expect(node(`reading:${book.id}`)).toMatchObject({ topicId: history.id, label: 'O 18 de Brumário' });
+    const kinds = g.edges.map((e: { kind: string; source: string; target: string }) => `${e.kind} ${e.source} ${e.target}`);
+    expect(kinds).toContain(`annotates note:${ann.id} reading:${book.id}`);
+    expect(kinds).toContain(`contains topic:${capital.id} note:${ann.id}`);
+    // Annotations still only on the book stay out of this topic's map.
+    expect(node(`note:${loose.id}`)).toBeUndefined();
   });
 });
 
