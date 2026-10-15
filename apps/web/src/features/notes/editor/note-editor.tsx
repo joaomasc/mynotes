@@ -3,7 +3,10 @@ import { EditorContent, useEditor, type Editor } from '@tiptap/react';
 import { useNavigate } from 'react-router';
 import { NOTE_TITLE_MAX, asRichTextDoc, parseInternalHref, type RichTextDoc } from '@mynotes/shared';
 import { entityPath } from '@/lib/entities';
+import { dictationSupported } from '@/lib/dictation/recorder';
 import { notesSync, writeEmergencyDraft, type SaveState } from '@/lib/sync/notes-sync';
+import { Dictation } from './dictation';
+import { DictationBar } from './dictation-bar';
 import { noteExtensions } from './extensions';
 import { ExternalLinkDialog, InternalLinkDialog } from './link-dialogs';
 import { ReferenceMenu } from './reference-menu';
@@ -159,6 +162,10 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
   });
   editorRef.current = editor;
 
+  // Speech to text, where the browser can record (see dictation.ts).
+  const [dictation] = useState(() => (dictationSupported() ? new Dictation() : null));
+  useEffect(() => (editor && dictation ? dictation.attach(editor) : undefined), [editor, dictation]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -244,11 +251,23 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
       {editor &&
         (compact ? (
           <div className="-mx-1 mb-1 overflow-x-auto border-b border-border pb-1">
-            <EditorToolbar editor={editor} onLink={() => setLinkDialog('external')} onInternalLink={() => setLinkDialog('internal')} />
+            <EditorToolbar
+              editor={editor}
+              onLink={() => setLinkDialog('external')}
+              onInternalLink={() => setLinkDialog('internal')}
+              dictation={dictation}
+            />
+            {dictation && <DictationBar dictation={dictation} />}
           </div>
         ) : (
           <div className="sticky top-[calc(3.25rem+env(safe-area-inset-top))] z-20 -mx-4 border-b border-border bg-bg/95 px-3 py-1.5 backdrop-blur sm:-mx-6 sm:px-5 lg:top-0 lg:-mx-8 lg:px-7">
-            <EditorToolbar editor={editor} onLink={() => setLinkDialog('external')} onInternalLink={() => setLinkDialog('internal')} />
+            <EditorToolbar
+              editor={editor}
+              onLink={() => setLinkDialog('external')}
+              onInternalLink={() => setLinkDialog('internal')}
+              dictation={dictation}
+            />
+            {dictation && <DictationBar dictation={dictation} />}
           </div>
         ))}
       <div className={compact ? '' : wide ? 'mx-auto max-w-5xl' : 'mx-auto max-w-[46rem]'}>

@@ -7,4 +7,5 @@ export * from './schemas/errors';
 export * from './schemas/auth';
 export * from './schemas/content';
 export * from './schemas/knowledge';
+export * from './schemas/transcription';
 export * from './backup';

@@ -27,6 +27,11 @@
       "bucket_name": "mynotes-files"
     }
   ],
+  // Speech-to-text for dictated notes (Whisper). Uses the account's daily free Neurons.
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
   "vars": {
     "ENVIRONMENT": "production",
     // Comma-separated exact origins allowed by CORS, e.g. "https://user.github.io".

@@ -33,7 +33,7 @@ Ambiente pessoal de conhecimento e estudos: assuntos hierárquicos, notas, bibli
 |---|---|
 | **Conta e sessão** | Login, logout, troca de senha, lista e revogação de sessões, expiração (absoluta e por inatividade), limitação de tentativas. Sem cadastro público: a conta é criada por script local. |
 | **Assuntos** | Entidade central: cadernos, matérias e subassuntos em profundidade ilimitada; criação rápida em linha; mover (arrastar e soltar ou “Mover para…”), reordenar, excluir mantendo o conteúdo ou enviando tudo à lixeira. A página do assunto reúne subassuntos, notas, livros (do assunto e relacionados), anotações de leitura que o citam, menções, tags, relações e tempo de estudo. |
-| **Notas** | Editor rico (títulos, listas, tarefas, citações, código, links); **referências com “/”** (`/assunto.Mercantilismo`, `/livro.O Capital#125`, `/pagina.O Capital`…) guardadas pelo id, com título sempre atual, detecção e reparo de referências quebradas; **tags com “#”** pesquisáveis e sugeridas; salvamento automático local-first, histórico de versões, backlinks, relações, favoritos, mover entre assuntos; botão “+” contextual. |
+| **Notas** | Editor rico (títulos, listas, tarefas, citações, código, links); **referências com “/”** (`/assunto.Mercantilismo`, `/livro.O Capital#125`, `/pagina.O Capital`…) guardadas pelo id, com título sempre atual, detecção e reparo de referências quebradas; **tags com “#”** pesquisáveis e sugeridas; salvamento automático local-first, histórico de versões, backlinks, relações, favoritos, mover entre assuntos; botão “+” contextual. **Ditado** (🎤 na barra do editor, em toda nota, anotação de página e resenha): grava e transcreve em português, com o texto aparecendo no cursor a cada pausa. |
 | **Biblioteca** | Upload com progresso (PDF, PNG, JPEG, WebP, EPUB, DOCX, TXT, Markdown — sem limite prático: acima de 50 MB o arquivo é enviado em partes), validação de tipo pela assinatura do arquivo, nomes internos aleatórios no R2, download autenticado, links assinados de 5 minutos, leitor de PDF no app (zoom, páginas, texto selecionável), busca e filtros. EPUB e DOCX: apenas download. |
 | **Livros e leituras** | Na Biblioteca. Cada livro é um espaço de estudo: leitor de PDF integrado que lembra a página atual, anotações por página (resumo, interpretação, crítica, dúvida, citação — tipo opcional), trecho selecionado no PDF como citação, “Minha resenha”, assuntos relacionados e “citado em”. Planos de leitura com etapas, prazos e progresso. |
 | **Diário de estudos** | Fora da navegação principal, sem perda de dados: tempo por assunto e “Registrar sessão” na página de cada assunto; histórico completo em `/study` (link em Configurações). |
@@ -68,6 +68,7 @@ cp apps/api/.dev.vars.example apps/api/.dev.vars
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 npm run db:migrate:local -w @mynotes/api      # cria o banco D1 local (.wrangler/)
 npm run dev:api                               # http://localhost:8787  (docs: /api/v1/docs)
+# ditado local: `npx wrangler login` e `npm run dev:ai -w @mynotes/api` (usa o Workers AI da sua conta)
 
 # 2) Conta (em outro terminal) — veja a seção seguinte
 npm run create-user -w @mynotes/api -- --username seu_usuario
@@ -156,6 +157,7 @@ Valores vigentes consultados durante o desenvolvimento; confira as páginas ofic
 | D1 | 5 GB; 500 MB por banco; 5 milhões de linhas lidas e 100 mil escritas por dia; 50 consultas por invocação; 100 parâmetros e 100 KB por instrução; linha de até 2 MB | Esquema e importação foram desenhados dentro desses limites (busca com `instr`, importação em uma instrução por tabela). |
 | R2 | 10 GB/mês; 1 milhão de operações classe A e 10 milhões de classe B por mês; sem custo de saída | O Worker aceita até 100 MB por requisição; arquivos maiores são enviados em partes de 50 MB (multipart do R2). O espaço usado conta na cota de 10 GB. |
 | Cron | 5 gatilhos por conta | O MyNotes usa 1 (limpeza diária). |
+| Workers AI | 10 mil *neurons*/dia (renova às 00h UTC = 21h de Brasília) | O ditado usa o Whisper large v3 turbo: cerca de 47 *neurons* por minuto de fala, ou seja, **~3,5 horas de ditado por dia** grátis. Silêncios não são enviados. Esgotada a cota, o app avisa e guarda o áudio para tentar de novo. |
 
 ## Limitações conhecidas
 
@@ -172,6 +174,7 @@ Coisas que **não** foram feitas (ou foram feitas de forma simplificada) nesta p
 - **Excluir assunto mantendo conteúdo:** os subassuntos movidos para cima mantêm suas chaves de ordenação e podem ficar intercalados com os irmãos existentes (reordene arrastando).
 - **Histórico de notas:** uma versão a cada 10 minutos de edição, até 50 por nota.
 - **Lixeira:** não é esvaziada automaticamente.
+- **Ditado:** precisa de conexão (sem ela, os trechos esperam na memória enquanto a página estiver aberta). O áudio não é guardado, só o texto. Fechar a nota antes de o último trecho chegar descarta esse trecho. No celular, a gravação para se a tela bloquear ou o app for para segundo plano (o app pede para manter a tela acesa durante o ditado).
 - **Proteção contra abuso:** a API limita tentativas de login; para proteção extra contra volume, configure uma regra de *rate limiting* da Cloudflare (WAF) para a rota do Worker.
 
 ## Solução de problemas

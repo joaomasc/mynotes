@@ -38,6 +38,8 @@ const child = spawn(
   [
     wrangler,
     'dev',
+    // No Cloudflare account in tests: remote bindings (Workers AI) stay off.
+    '--local',
     '--port',
     '8788',
     '--ip',

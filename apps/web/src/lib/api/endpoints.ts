@@ -55,6 +55,8 @@ import type {
   TopicMove,
   TopicUpdate,
   TopicWithCounts,
+  Transcription,
+  TranscriptionCreate,
   TrashItem,
   UpcomingGoal,
   UploadStart,
@@ -232,5 +234,10 @@ export const endpoints = {
     commit: (jobId: string, chunkCount: number, confirm?: string) =>
       api.post<ImportResult>(`/backup/imports/${jobId}/commit`, { chunkCount, ...(confirm ? { confirm } : {}) }),
     cancel: (jobId: string) => api.del(`/backup/imports/${jobId}`),
+  },
+
+  transcriptions: {
+    /** One dictated segment; not counted in the sync indicator (nothing is saved). */
+    create: (body: TranscriptionCreate) => api.post<Transcription>('/transcriptions', body, { track: false }),
   },
 };

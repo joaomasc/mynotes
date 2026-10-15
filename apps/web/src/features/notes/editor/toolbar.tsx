@@ -11,6 +11,7 @@ import {
   List,
   ListOrdered,
   ListTodo,
+  Mic,
   Minus,
   Quote,
   Redo2,
@@ -19,7 +20,10 @@ import {
   Undo2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/cn';
+import type { Dictation } from './dictation';
+import { useDictationState } from './dictation-bar';
 
 function ToolButton({
   label,
@@ -58,14 +62,36 @@ function ToolButton({
 
 const Sep = () => <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />;
 
+/** Starts or stops dictation (speech to text, in Portuguese). */
+function DictationButton({ dictation }: { dictation: Dictation }) {
+  const { status } = useDictationState(dictation);
+  const recording = status === 'recording';
+  return (
+    <ToolButton
+      label={recording ? 'Parar ditado' : 'Ditar: gravar e transcrever'}
+      active={recording}
+      disabled={status === 'starting' || status === 'finishing'}
+      onClick={() => {
+        if (recording) dictation.stop();
+        else dictation.start().catch((err: Error) => toast.error(err.message));
+      }}
+    >
+      <Mic className={cn('size-4', recording && 'text-danger')} />
+    </ToolButton>
+  );
+}
+
 export function EditorToolbar({
   editor,
   onLink,
   onInternalLink,
+  dictation,
 }: {
   editor: Editor;
   onLink: () => void;
   onInternalLink: () => void;
+  /** Absent when the browser cannot record. */
+  dictation?: Dictation | null;
 }) {
   const s = useEditorState({
     editor,
@@ -95,6 +121,12 @@ export function EditorToolbar({
       aria-label="Formatação"
       className="scrollbar-thin flex items-center gap-0.5 overflow-x-auto"
     >
+      {dictation && (
+        <>
+          <DictationButton dictation={dictation} />
+          <Sep />
+        </>
+      )}
       <ToolButton label="Desfazer" shortcut="Ctrl+Z" disabled={!s.canUndo} onClick={() => chain().undo().run()}>
         <Undo2 className={i} />
       </ToolButton>

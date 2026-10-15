@@ -53,7 +53,7 @@ A documentação interativa da API fica em `/api/v1/docs` (OpenAPI em `/api/v1/o
 
 O workflow **Publicar API** (`.github/workflows/deploy-worker.yml`) é **manual**:
 
-1. Crie um token em *Cloudflare › My Profile › API Tokens* com as permissões *Account › Workers Scripts: Edit* e *Account › D1: Edit* (e *Workers R2 Storage: Read* se quiser que o deploy valide o bucket).
+1. Crie um token em *Cloudflare › My Profile › API Tokens* com as permissões *Account › Workers Scripts: Edit* e *Account › D1: Edit* (e *Workers R2 Storage: Read* se quiser que o deploy valide o bucket). O ditado usa o binding `AI` (Workers AI), cobrado da cota gratuita da conta; se o deploy reclamar de permissão para ele, acrescente *Account › Workers AI: Read*.
 2. No GitHub: *Settings › Secrets and variables › Actions › Secrets*: `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID`.
 3. Em *Settings › Environments*, crie `production` e, se quiser uma aprovação manual a cada deploy, adicione você como *required reviewer*.
 4. Em *Actions › Publicar API › Run workflow*, marque “Aplicar migrações” quando houver migrações novas.

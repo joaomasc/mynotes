@@ -9,6 +9,7 @@ import { readingRoutes } from './readings/routes';
 import { referenceRoutes } from './references/routes';
 import { studyRoutes } from './study/routes';
 import { topicRoutes } from './topics/routes';
+import { transcriptionRoutes } from './transcriptions/routes';
 import { trashRoutes } from './trash/routes';
 
 /** All feature route modules, registered under /api/v1 (auth is built in). */
@@ -24,4 +25,5 @@ export const routeModules: RouteModule[] = [
   overviewRoutes,
   referenceRoutes,
   backupRoutes,
+  transcriptionRoutes,
 ];

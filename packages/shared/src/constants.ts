@@ -214,3 +214,18 @@ export type InternalLinkType = (typeof INTERNAL_LINK_TYPES)[number];
 
 export const BACKUP_FORMAT = 'mynotes-backup';
 export const BACKUP_FORMAT_VERSION = 1;
+
+/**
+ * Dictation: the browser records 16 kHz mono 16-bit WAV and sends it in
+ * segments (cut at pauses), so text appears while the user is still talking
+ * and every request stays below the 2 MB JSON body limit once base64-encoded.
+ */
+export const DICTATION_SAMPLE_RATE = 16_000;
+/** A segment is cut at the first pause after this many seconds… */
+export const DICTATION_SEGMENT_TARGET_SECONDS = 20;
+/** …or here, even without a pause. */
+export const DICTATION_SEGMENT_MAX_SECONDS = 40;
+/** 44-byte WAV header + PCM, with a little slack. */
+export const DICTATION_AUDIO_MAX_BYTES = 44 + (DICTATION_SEGMENT_MAX_SECONDS + 2) * DICTATION_SAMPLE_RATE * 2;
+/** Recent text sent as context (vocabulary, punctuation style). */
+export const DICTATION_PROMPT_MAX = 400;

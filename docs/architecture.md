@@ -34,6 +34,7 @@
 | concepts, relations, mind-maps, graph | conhecimento e visualização |
 | search, dashboard, favorites, activity, settings, trash | transversais |
 | backup | `manifest`, `export/{tabela}`, `imports` (+ `chunks`, `commit`) |
+| transcriptions | `POST transcriptions`: um trecho de ditado (WAV em base64) → texto, via Workers AI |
 
 Documentação viva: `GET /api/v1/docs` (Scalar) e `GET /api/v1/openapi.json`.
 
@@ -83,3 +84,11 @@ O **assunto** é a entidade central: “caderno” (raiz), “matéria” (filho
 - Upload em streaming direto para o R2 (`FixedLengthStream`), sem carregar o arquivo na memória do Worker.
 - ZIP de backup montado/lido no navegador; exportação paginada por tabela; importação aplicada com uma instrução por tabela (limite de 50 consultas por invocação).
 - Limpeza (tokens expirados, uploads abandonados, importações antigas) num único cron diário.
+
+## Ditado (voz → texto)
+
+O navegador captura o microfone num *AudioWorklet* (`lib/dictation/capture.worklet.ts`), converte para 16 kHz mono e corta a fala em trechos nas pausas (`lib/dictation/audio.ts`: corte após ~1,2 s de silêncio, ou na primeira pausa depois de 20 s, ou no ponto mais silencioso perto de 40 s). Silêncio antes da fala é descartado. Cada trecho vira WAV, vai em base64 para `POST /transcriptions` e o Worker o repassa sem decodificar ao `@cf/openai/whisper-large-v3-turbo` (`language: pt`, filtro de voz ativo) — CPU do Worker perto de zero.
+
+Os trechos são enviados um de cada vez, em ordem, com os últimos ~400 caracteres antes do cursor como `initial_prompt` (nomes e termos da nota melhoram o reconhecimento). O texto entra na posição em que o cursor estava ao começar, mapeada a cada edição, então dá para continuar editando outra parte da nota enquanto o ditado chega. Falha de rede pausa a fila até a conexão voltar; outros erros (inclusive cota esgotada) mantêm o áudio para “Tentar de novo”. Frases que o Whisper costuma inventar no silêncio em português (“Legendas pela comunidade Amara.org”, “Obrigado.” isolado…) são removidas no servidor.
+
+Por que não a Web Speech API: não existe no Firefox, no Chrome envia o áudio ao Google sem pontuação confiável e no iOS se comporta de forma diferente. Por que não Whisper no navegador: modelos de 75 MB a 1,5 GB, lentos no celular.
