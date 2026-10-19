@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
-import { BookOpen, Ellipsis, ExternalLink, FileText, ListChecks, Paperclip, Pencil, Plus, Quote, Trash, Upload } from 'lucide-react';
+import { BookOpen, Ellipsis, ExternalLink, FileText, ListChecks, Maximize2, Minimize2, PanelRight, Paperclip, Pencil, Plus, Quote, Trash, Upload } from 'lucide-react';
 import {
   ANNOTATION_TYPES,
   ANNOTATION_TYPE_LABELS,
@@ -28,6 +28,7 @@ import { ApiError, errorMessage, isVersionConflict } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
 import { longDate, relativeTime } from '@/lib/format';
+import { useLocalPreference } from '@/lib/hooks';
 import { qk } from '@/lib/query';
 import { uploadNewDocument, validateFile } from '@/lib/uploads';
 import { DocumentPdf, type PdfSelection } from '../documents/pdf-viewer';
@@ -39,9 +40,12 @@ import { FavoriteButton } from '../shared/favorite-button';
 import { RelationsPanel } from '../shared/relations-panel';
 import { TopicBreadcrumb, TopicChip } from '../shared/topic-breadcrumb';
 import { useRecordView } from '../shared/use-view';
+import { workspace } from '../workspace/store';
+import { usePane } from '../workspace/tab-info';
+import { readerSync, useReaderSync } from './reader-sync';
 import { ProgressDialog, ReadingFormDialog, invalidateReadings, readingPercent } from './reading-dialogs';
 
-type Tab = 'annotations' | 'review' | 'about';
+export type Tab = 'annotations' | 'review' | 'about';
 
 /** Optional outline for a page annotation (only offered while it is empty). */
 const ANNOTATION_OUTLINE: RichTextDoc = {
@@ -61,6 +65,7 @@ function Reader({
   markers,
   onPage,
   onSelection,
+  className = 'h-[62dvh] lg:h-[calc(var(--view-h)-9rem)]',
 }: {
   doc: DocumentMeta;
   reading: Reading;
@@ -68,6 +73,8 @@ function Reader({
   markers: Map<number, number>;
   onPage: (page: number, total: number) => void;
   onSelection: (s: PdfSelection | null) => void;
+  /** Height of the viewer. */
+  className?: string;
 }) {
   // The page where the reading stopped is read once, when the file opens.
   const [initialPage] = useState(reading.currentPage);
@@ -81,7 +88,7 @@ function Reader({
   return (
     <DocumentPdf
       doc={doc}
-      className="h-[62dvh] overflow-hidden rounded-xl border border-border lg:h-[calc(var(--view-h)-9rem)]"
+      className={cn('overflow-hidden rounded-xl border border-border', className)}
       initialPage={initialPage}
       goto={goto}
       onPageChange={onPage}
@@ -531,7 +538,84 @@ function AboutPanel({ reading, doc }: { reading: Reading; doc: DocumentMeta | un
   );
 }
 
+/* ---------------------------------------------------------- sections -- */
+
+/** A book's page annotations (in page order) and the notes citing it. */
+function useBookNotes(id: string, enabled: boolean) {
+  const annotations = useQuery({
+    queryKey: qk.notes({ readingId: id, role: 'annotation' }),
+    queryFn: () => endpoints.notes.list({ readingId: id, role: 'annotation', sort: 'created', limit: 200 }),
+    enabled,
+  });
+  const sorted = useMemo(
+    () => [...(annotations.data?.data ?? [])].sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.createdAt.localeCompare(b.createdAt)),
+    [annotations.data],
+  );
+  // Notes citing this book (and which pages): shared with "Sobre › Citado em".
+  const mentions = useQuery({ queryKey: qk.backlinks('reading', id), queryFn: () => endpoints.notes.backlinks('reading', id), enabled });
+  return { sorted, loading: annotations.isLoading, mentions: mentions.data };
+}
+
+/** Annotations, review and "about" of a book: beside its PDF, or in a pane of their own. */
+export function ReadingSections({
+  reading,
+  doc,
+  hasPdf,
+  page,
+  selection,
+  onJump,
+  tab,
+  setTab,
+  activeId,
+  setActiveId,
+}: {
+  reading: Reading;
+  doc: DocumentMeta | undefined;
+  hasPdf: boolean;
+  page: number | null;
+  selection: PdfSelection | null;
+  onJump: (page: number) => void;
+  tab: Tab;
+  setTab: (t: Tab) => void;
+  activeId: string | null;
+  setActiveId: (id: string | null) => void;
+}) {
+  const { sorted, loading, mentions } = useBookNotes(reading.id, true);
+  return (
+    <div className="space-y-4">
+      <Segmented
+        label="Seção"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'annotations', label: `Anotações${sorted.length ? ` (${sorted.length})` : ''}` },
+          { value: 'review', label: 'Minha resenha' },
+          { value: 'about', label: 'Sobre' },
+        ]}
+      />
+      {tab === 'annotations' && (
+        <AnnotationsPanel
+          reading={reading}
+          annotations={sorted}
+          loading={loading}
+          page={page}
+          selection={selection}
+          activeId={activeId}
+          setActiveId={setActiveId}
+          onJump={onJump}
+          hasPdf={hasPdf}
+          mentions={mentions ?? []}
+        />
+      )}
+      {tab === 'review' && <ReviewPanel reading={reading} />}
+      {tab === 'about' && <AboutPanel reading={reading} doc={doc} />}
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------- page -- */
+
+export const readingPanelPath = (id: string) => `/readings/${id}/panel`;
 
 export function Component() {
   const { id = '' } = useParams();
@@ -539,6 +623,9 @@ export function Component() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const confirm = useConfirm();
+  const pane = usePane();
+  const sync = useReaderSync(id);
+  const [maximized, setMaximized] = useLocalPreference('mynotes:reader-maximized', false);
   const [dialog, setDialog] = useState<'edit' | 'progress' | null>(null);
   const [tab, setTab] = useState<Tab>(params.get('section') === 'review' ? 'review' : params.get('section') === 'about' ? 'about' : 'annotations');
   const [activeId, setActiveId] = useState<string | null>(params.get('annotation'));
@@ -555,12 +642,24 @@ export function Component() {
     queryFn: () => endpoints.documents.get(r!.documentId!),
     enabled: !!r?.documentId,
   });
-  const annotations = useQuery({
-    queryKey: qk.notes({ readingId: id, role: 'annotation' }),
-    queryFn: () => endpoints.notes.list({ readingId: id, role: 'annotation', sort: 'created', limit: 200 }),
-    enabled: !!r,
-  });
+  const { sorted, mentions } = useBookNotes(id, !!r);
   useRecordView('reading', id, query.isSuccess);
+
+  // The annotations open beside follow the PDF: page being read and selected text…
+  const select = useCallback(
+    (s: PdfSelection | null) => {
+      setSelection(s);
+      readerSync.set(id, { selection: s });
+    },
+    [id],
+  );
+  // …and their "go to page" moves it.
+  const lastJump = useRef(sync.goto?.seq);
+  useEffect(() => {
+    if (!sync.goto || sync.goto.seq === lastJump.current) return;
+    lastJump.current = sync.goto.seq;
+    setGoto(sync.goto);
+  }, [sync.goto]);
 
   // Links like ?page=125&annotation=… (from references) open the right place.
   useEffect(() => {
@@ -580,19 +679,13 @@ export function Component() {
     setParams({}, { replace: true });
   }, [params, setParams]);
 
-  const sorted = useMemo(
-    () => [...(annotations.data?.data ?? [])].sort((a, b) => (a.page ?? Infinity) - (b.page ?? Infinity) || a.createdAt.localeCompare(b.createdAt)),
-    [annotations.data],
-  );
-  // Notes citing this book (and which pages): shared with "Sobre › Citado em".
-  const mentions = useQuery({ queryKey: qk.backlinks('reading', id), queryFn: () => endpoints.notes.backlinks('reading', id), enabled: !!r });
   /** Marks on the PDF pages: annotations plus notes that cite the page. */
   const markers = useMemo(() => {
     const m = new Map<number, number>();
     for (const a of sorted) if (a.page) m.set(a.page, (m.get(a.page) ?? 0) + 1);
-    for (const b of mentions.data ?? []) for (const p of b.citedPages ?? []) m.set(p, (m.get(p) ?? 0) + 1);
+    for (const b of mentions ?? []) for (const p of b.citedPages ?? []) m.set(p, (m.get(p) ?? 0) + 1);
     return m;
-  }, [sorted, mentions.data]);
+  }, [sorted, mentions]);
 
   // Remember the page being read (the last page shown for a few seconds).
   const saving = useRef(false);
@@ -623,10 +716,11 @@ export function Component() {
   const onPage = useCallback(
     (page: number, total: number) => {
       setViewerPage(page);
+      readerSync.set(id, { page });
       clearTimeout(pageTimer.current);
       pageTimer.current = setTimeout(() => void savePage(page, total), 2500);
     },
-    [savePage],
+    [savePage, id],
   );
   useEffect(() => () => clearTimeout(pageTimer.current), []);
 
@@ -663,37 +757,69 @@ export function Component() {
   const hasPdf = !!doc.data && doc.data.mimeType === 'application/pdf';
   const pct = readingPercent(r);
   const jump = (page: number) => setGoto({ page, seq: Date.now() });
+  const pageText = `${r.currentPage ? `p. ${hasPdf && viewerPage ? viewerPage : r.currentPage}${r.totalPages ? ` de ${r.totalPages}` : ''} · ` : ''}${Math.round(pct)}%`;
+
+  // Maximized: the PDF takes the whole tab and the annotations open in a pane beside it.
+  const besideOpen = !!pane && sync.panels > 0;
+  const openBeside = () => pane && workspace.openBeside(readingPanelPath(id), pane.paneId);
+  const maximize = () => {
+    setMaximized(true);
+    if (!besideOpen) openBeside();
+  };
+  const restore = () => {
+    setMaximized(false);
+    workspace.closeTabsWhere((p) => p.split(/[?#]/)[0] === readingPanelPath(id));
+  };
 
   const panel = (
-    <div className="space-y-4">
-      <Segmented
-        label="Seção"
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: 'annotations', label: `Anotações${sorted.length ? ` (${sorted.length})` : ''}` },
-          { value: 'review', label: 'Minha resenha' },
-          { value: 'about', label: 'Sobre' },
-        ]}
-      />
-      {tab === 'annotations' && (
-        <AnnotationsPanel
-          reading={r}
-          annotations={sorted}
-          loading={annotations.isLoading}
-          page={hasPdf ? viewerPage : r.currentPage}
-          selection={selection}
-          activeId={activeId}
-          setActiveId={setActiveId}
-          onJump={jump}
-          hasPdf={hasPdf}
-          mentions={mentions.data ?? []}
-        />
-      )}
-      {tab === 'review' && <ReviewPanel reading={r} />}
-      {tab === 'about' && <AboutPanel reading={r} doc={doc.data} />}
-    </div>
+    <ReadingSections
+      reading={r}
+      doc={doc.data}
+      hasPdf={hasPdf}
+      page={hasPdf ? viewerPage : r.currentPage}
+      selection={selection}
+      onJump={jump}
+      tab={tab}
+      setTab={setTab}
+      activeId={activeId}
+      setActiveId={setActiveId}
+    />
   );
+
+  if (hasPdf && doc.data && maximized) {
+    return (
+      <div className={cn('flex flex-col', pane && 'h-(--view-h)')}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border bg-surface px-3 py-2">
+          <BookOpen className="size-4 shrink-0 text-reading" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-[15px] font-semibold">{r.title}</h1>
+          </div>
+          <span className="text-xs text-muted tabular-nums">{pageText}</span>
+          {pane && !besideOpen && (
+            <Button size="sm" variant="outline" icon={<PanelRight className="size-3.5" />} onClick={openBeside}>
+              Anotações ao lado
+            </Button>
+          )}
+          <Button size="sm" variant="outline" icon={<Minimize2 className="size-3.5" />} onClick={restore}>
+            Restaurar
+          </Button>
+        </div>
+        <div className={cn('p-2', pane && 'min-h-0 flex-1')}>
+          <Reader
+            doc={doc.data}
+            reading={r}
+            goto={goto}
+            markers={markers}
+            onPage={onPage}
+            onSelection={select}
+            className={pane ? 'h-full' : 'h-[calc(100dvh-3.25rem-4rem-3.25rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))]'}
+          />
+        </div>
+        {/* Phone layout: no panes, the annotations follow below. */}
+        {!pane && <div className="px-4 py-5">{panel}</div>}
+      </div>
+    );
+  }
 
   return (
     <div className={cn('mx-auto w-full px-4 py-5 sm:px-6 lg:px-8', hasPdf ? 'max-w-none' : 'max-w-4xl')}>
@@ -725,23 +851,26 @@ export function Component() {
             <Button variant="outline" onClick={() => setDialog('progress')}>
               Progresso
             </Button>
+            {hasPdf && (
+              <Button variant="outline" icon={<Maximize2 className="size-4" />} onClick={maximize} title={pane ? 'O PDF ocupa a aba e as anotações abrem ao lado' : 'O PDF ocupa a tela'}>
+                Maximizar PDF
+              </Button>
+            )}
           </div>
         </div>
         <div className="mt-3 flex max-w-xl items-center gap-3">
           <Progress value={pct} className="h-2 flex-1" label="Progresso de leitura" />
-          <span className="shrink-0 text-xs text-muted tabular-nums">
-            {r.currentPage ? `p. ${hasPdf && viewerPage ? viewerPage : r.currentPage}${r.totalPages ? ` de ${r.totalPages}` : ''} · ` : ''}
-            {Math.round(pct)}%
-          </span>
+          <span className="shrink-0 text-xs text-muted tabular-nums">{pageText}</span>
         </div>
       </header>
 
       {hasPdf && doc.data ? (
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]">
+        <div className={cn('grid gap-5', !besideOpen && 'lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]')}>
           <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
-            <Reader doc={doc.data} reading={r} goto={goto} markers={markers} onPage={onPage} onSelection={setSelection} />
+            <Reader doc={doc.data} reading={r} goto={goto} markers={markers} onPage={onPage} onSelection={select} />
           </div>
-          <div className="min-w-0">{panel}</div>
+          {/* Already open beside: not shown twice. */}
+          {!besideOpen && <div className="min-w-0">{panel}</div>}
         </div>
       ) : (
         <div className="space-y-5">

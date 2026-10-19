@@ -29,8 +29,11 @@ import { ENTITY_CSS_VAR, EntityIcon, entityLabel } from '@/lib/entities';
 import { useLocalPreference } from '@/lib/hooks';
 import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
+import { chainOf } from '../mindmaps/chain';
 import { RelationDialog } from '../shared/relation-dialog';
 import { TopicBreadcrumb } from '../shared/topic-breadcrumb';
+import { openModeOf, openPath, workspace } from '../workspace/store';
+import { usePane } from '../workspace/tab-info';
 import { MoveTopicDialog, TopicFormDialog } from './topic-dialogs';
 import { useTopics, type TopicNode } from './use-topics';
 
@@ -52,6 +55,8 @@ type MNodeData = {
   childCount: number;
   collapsed: boolean;
   connectable: boolean;
+  /** Outside the chain of the clicked item: faded. */
+  dim: boolean;
   onToggle: () => void;
   /** Opens the item (double click). */
   onOpen: () => void;
@@ -69,9 +74,10 @@ const MindNode = memo(function MindNode({ data, selected }: NodeProps<MNode>) {
         data.onOpen();
       }}
       className={cn(
-        'flex max-w-60 items-center gap-1.5 rounded-xl border-2 bg-surface px-3 py-1.5 shadow-card',
+        'flex max-w-60 items-center gap-1.5 rounded-xl border-2 bg-surface px-3 py-1.5 shadow-card transition-opacity',
         data.root ? 'text-base font-semibold' : data.type === 'topic' ? 'text-sm font-medium' : 'rounded-full border px-2.5 py-1 text-xs',
         selected && 'ring-2 ring-text',
+        data.dim && 'opacity-30',
       )}
       style={{ borderColor: color }}
     >
@@ -241,39 +247,21 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
     [saveSoon],
   );
 
+  // Items open beside the map (which stays on the left); in the phone layout, in place.
+  const pane = usePane();
   const open = useCallback(
-    (g: GraphNode) => void navigate(referencePath({ type: g.type, id: g.entityId, role: g.role, readingId: null, page: null })),
-    [navigate],
+    (g: GraphNode, e?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }) => {
+      const path = referencePath({ type: g.type, id: g.entityId, role: g.role, readingId: null, page: null });
+      const mode = e ? openModeOf(e) : 'same';
+      if (mode !== 'same') openPath(path, mode);
+      else if (pane) workspace.openBeside(path, pane.paneId);
+      else void navigate(path);
+    },
+    [navigate, pane],
   );
 
-  const [nodes, setNodes] = useState<MNode[]>([]);
-  useEffect(() => {
-    // Keeps each node's measured size: React Flow hides unmeasured nodes for a
-    // moment, which made the second click of a double click hit the background.
-    setNodes((prev) => {
-      const measured = new Map(prev.map((n) => [n.id, n.measured]));
-      return visible.map(({ branch }) => ({
-        id: branch.key,
-        measured: measured.get(branch.key),
-        type: 'mind',
-        position: positions[branch.key] ?? auto.get(branch.key) ?? { x: 0, y: 0 },
-        selected: branch.key === selected,
-        data: {
-          label: branch.node.label,
-          type: branch.node.type,
-          root: branch.key === root.key,
-          childCount: branch.children.length,
-          collapsed: collapsed.has(branch.key),
-          connectable: connectMode,
-          onToggle: () => toggle(branch.key),
-          onOpen: () => open(branch.node),
-        },
-      }));
-    });
-  }, [visible, positions, auto, selected, root.key, collapsed, connectMode, toggle, open]);
-
-  const shown = new Set(visible.map((v) => v.branch.key));
-  const edges: Edge[] = [
+  const shown = useMemo(() => new Set(visible.map((v) => v.branch.key)), [visible]);
+  const baseEdges = useMemo<Edge[]>(() => [
     ...visible
       .filter((v) => v.parent)
       .map((v) => ({
@@ -303,7 +291,6 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
         id: e.key,
         source: e.source,
         target: e.target,
-        selected: selectedEdge?.key === e.key,
         style: e.relationId
           ? { stroke: 'var(--accent)', strokeWidth: 1.5, strokeDasharray: '6 4' }
           : { stroke: 'var(--c-note)', strokeWidth: 1, strokeDasharray: '2 3' },
@@ -316,7 +303,54 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
             }
           : {}),
       })),
-  ];
+  ], [visible, showItems, showRefs, graph, shown]);
+
+  // Clicking an item lights its chain: path to the root, branch below, relations followed link after link.
+  const chain = useMemo(() => {
+    if (!selected || !shown.has(selected)) return null;
+    const parentOf = new Map(visible.map((v) => [v.branch.key, v.parent]));
+    return chainOf(selected, (id) => parentOf.get(id), baseEdges, (e) => e.id.startsWith('h|'));
+  }, [selected, shown, visible, baseEdges]);
+
+  const edges: Edge[] = baseEdges.map((e) => {
+    const picked = selectedEdge?.key === e.id;
+    if (!chain) return picked ? { ...e, selected: true } : e;
+    if (!chain.edges.has(e.id)) return { ...e, selected: picked, style: { ...e.style, opacity: 0.12 }, labelStyle: { ...e.labelStyle, opacity: 0.3 } };
+    return {
+      ...e,
+      selected: picked,
+      animated: !e.id.startsWith('h|'),
+      zIndex: 1,
+      style: { ...e.style, stroke: 'var(--accent)', strokeWidth: Math.max(2, Number(e.style?.strokeWidth ?? 1) + 1) },
+    };
+  });
+
+  const [nodes, setNodes] = useState<MNode[]>([]);
+  useEffect(() => {
+    // Keeps each node's measured size: React Flow hides unmeasured nodes for a
+    // moment, which made the second click of a double click hit the background.
+    setNodes((prev) => {
+      const measured = new Map(prev.map((n) => [n.id, n.measured]));
+      return visible.map(({ branch }) => ({
+        id: branch.key,
+        measured: measured.get(branch.key),
+        type: 'mind',
+        position: positions[branch.key] ?? auto.get(branch.key) ?? { x: 0, y: 0 },
+        selected: branch.key === selected,
+        data: {
+          label: branch.node.label,
+          type: branch.node.type,
+          root: branch.key === root.key,
+          childCount: branch.children.length,
+          collapsed: collapsed.has(branch.key),
+          connectable: connectMode,
+          dim: !!chain && !chain.nodes.has(branch.key),
+          onToggle: () => toggle(branch.key),
+          onOpen: () => open(branch.node),
+        },
+      }));
+    });
+  }, [visible, positions, auto, selected, root.key, collapsed, connectMode, toggle, open, chain]);
 
   const removeRelation = useMutation({
     mutationFn: (id: string) => endpoints.relations.remove(id),
@@ -434,9 +468,14 @@ function MapView({ topic, graph, layout, showItems, showRefs }: { topic: TopicNo
             </IconButton>
           </div>
           <div className="mt-3 flex flex-col items-start gap-2 text-sm">
-            <Link to={referencePath({ type: sel.type, id: sel.entityId, role: sel.role, readingId: null, page: null })} className="inline-flex items-center gap-1.5 font-medium text-accent hover:underline">
-              Abrir <ExternalLink className="size-3.5" aria-hidden />
-            </Link>
+            <button
+              type="button"
+              onClick={(e) => open(sel, e)}
+              title={pane ? 'Abre ao lado, mantendo o mapa à esquerda' : undefined}
+              className="inline-flex items-center gap-1.5 font-medium text-accent hover:underline"
+            >
+              Abrir {pane && 'ao lado'} <ExternalLink className="size-3.5" aria-hidden />
+            </button>
             {selTopic && (
               <>
                 <button type="button" onClick={() => setDialog({ kind: 'sub', topic: selTopic })} className="inline-flex items-center gap-1.5 text-muted hover:text-accent">

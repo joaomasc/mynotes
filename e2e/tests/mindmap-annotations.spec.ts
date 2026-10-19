@@ -45,12 +45,14 @@ test('a book annotation filed under a subtopic shows in the mind map, tied to it
   await expect(flow.getByText('Capital M')).toBeVisible({ timeout: 20_000 });
   await expect(flow.getByText('Brumário M, p. 12')).toBeVisible();
   await expect(flow.getByText('Brumário M', { exact: true })).toBeVisible();
-  // Double click opens an item (even when the selection panel opens over it).
+  // Double click opens an item beside the map (even when the selection panel opens over it); the map stays on the left.
+  const panes = page.getByRole('region', { name: 'Painel' });
   await flow.getByText('Brumário M', { exact: true }).dblclick();
-  await page.waitForURL(/\/readings\/[0-9a-f-]{36}$/);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Brumário M');
-  await page.goBack();
-  await page.locator('.react-flow').getByText('Capital M', { exact: true }).dblclick();
-  await page.waitForURL(/\/topics\/[0-9a-f-]{36}$/);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Capital M');
+  await expect(panes).toHaveCount(2);
+  await expect(panes.nth(1).getByRole('heading', { level: 1 })).toContainText('Brumário M');
+  await expect(panes.nth(0).locator('.react-flow')).toBeVisible();
+  // The next item opens in the same pane beside (the map keeps the focus).
+  await panes.nth(0).locator('.react-flow').getByText('Capital M', { exact: true }).dblclick();
+  await expect(panes).toHaveCount(2);
+  await expect(panes.nth(1).getByRole('heading', { level: 1 })).toContainText('Capital M');
 });

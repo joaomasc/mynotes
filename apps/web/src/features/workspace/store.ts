@@ -281,8 +281,8 @@ class Workspace {
     return tab;
   }
 
-  /** Opens a path in a new pane beside (row) or below (col) a pane. */
-  openSplit(path: string, dir: 'row' | 'col', opts: { paneId?: string; before?: boolean; tab?: TabState } = {}) {
+  /** Opens a path in a new pane beside (row) or below (col) a pane (which stays active with `keepActive`). */
+  openSplit(path: string, dir: 'row' | 'col', opts: { paneId?: string; before?: boolean; tab?: TabState; keepActive?: boolean } = {}) {
     if (!this.enabled) return this.fallbackNavigate?.(path);
     const target = findPane(this.state.root, opts.paneId ?? this.state.activePane) ?? this.activePane();
     const pane = newPane([opts.tab ?? newTab(path)]);
@@ -294,7 +294,39 @@ class Workspace {
       sizes: [0.5, 0.5],
     };
     const root = replaceNode(this.state.root, target.id, split)!;
-    this.set({ ...this.state, root, activePane: pane.id });
+    this.set({ ...this.state, root, activePane: opts.keepActive ? target.id : pane.id });
+  }
+
+  /** The pane right beside a pane (its right neighbour in a side-by-side split), if any. */
+  paneBeside(paneId: string): PaneNode | undefined {
+    const walk = (n: LayoutNode): PaneNode | undefined => {
+      if (n.kind === 'pane') return undefined;
+      const i = n.children.findIndex((c) => (c.kind === 'pane' ? c.id === paneId : !!findPane(c, paneId)));
+      if (i < 0) return undefined;
+      const inner = walk(n.children[i]!);
+      if (inner) return inner;
+      const next = n.dir === 'row' ? n.children[i + 1] : undefined;
+      return next ? allPanes(next)[0] : undefined;
+    };
+    return walk(this.state.root);
+  }
+
+  /**
+   * Opens a path beside a pane, which stays as it is and keeps the focus (a
+   * map or a PDF used to open things): the pane on its right shows it (so
+   * opening several items reuses the same side), or a new pane is split off
+   * when there is none.
+   */
+  openBeside(path: string, fromPaneId: string = this.state.activePane) {
+    if (!this.enabled) return this.fallbackNavigate?.(path);
+    const beside = this.paneBeside(fromPaneId);
+    if (!beside) return this.openSplit(path, 'row', { paneId: fromPaneId, keepActive: true });
+    const tab = beside.tabs.find((t) => t.id === beside.active) ?? beside.tabs[0]!;
+    if (tab.pinned) {
+      const opened = newTab(path);
+      return this.updatePane(beside.id, (p) => ({ ...p, tabs: [...p.tabs, opened], active: opened.id }));
+    }
+    void tabRouter(tab).navigate(path);
   }
 
   activate(tabId: string) {
@@ -328,6 +360,12 @@ class Workspace {
       },
       { closed },
     );
+  }
+
+  /** Closes every tab showing a matching path. */
+  closeTabsWhere(match: (path: string) => boolean) {
+    const ids = allPanes(this.state.root).flatMap((p) => p.tabs.filter((t) => match(t.path)).map((t) => t.id));
+    ids.forEach((id) => this.closeTab(id));
   }
 
   closeOthers(tabId: string) {

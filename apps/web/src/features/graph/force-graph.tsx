@@ -29,6 +29,8 @@ export interface FGNode {
   dashed?: boolean;
   /** Tags are drawn smaller and hollow. */
   shape?: 'tag';
+  /** A root topic: its cluster gathers around it (one cluster per group of connected items). */
+  root?: boolean;
 }
 
 export interface FGEdge {
@@ -94,6 +96,11 @@ interface SimNode extends SimulationNodeDatum {
   key: string;
   degree: number;
   data: FGNode;
+  /** Center of its cluster (connected component), where the centering force pulls it. */
+  cx: number;
+  cy: number;
+  /** The node its cluster is centered on (the main root topic). */
+  hub: boolean;
 }
 type SimLink = SimulationLinkDatum<SimNode> & { data: FGEdge };
 
@@ -119,6 +126,93 @@ function makeColorResolver() {
 
 const radiusOf = (n: SimNode, size: number) => (n.data.shape === 'tag' ? 2.5 : 3.5 + Math.sqrt(n.degree) * 2.1) * size;
 
+interface Cluster {
+  keys: string[];
+  hub: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Splits the graph into clusters of connected items (like Obsidian: groups
+ * with no link between them float apart) and gives each one a center: the
+ * biggest in the middle, the others packed around it, lone items in a ring
+ * outside. Each cluster is centered on its root topic with the most links.
+ */
+function layoutClusters(nodes: FGNode[], neighbours: Map<string, Set<string>>, linkDistance: number): { clusters: Cluster[]; byKey: Map<string, Cluster> } {
+  const seen = new Set<string>();
+  const groups: string[][] = [];
+  for (const n of nodes) {
+    if (seen.has(n.key)) continue;
+    const keys = [n.key];
+    seen.add(n.key);
+    for (let i = 0; i < keys.length; i++) {
+      for (const m of neighbours.get(keys[i]!) ?? []) {
+        if (seen.has(m)) continue;
+        seen.add(m);
+        keys.push(m);
+      }
+    }
+    groups.push(keys);
+  }
+  const data = new Map(nodes.map((n) => [n.key, n]));
+  const degree = (k: string) => neighbours.get(k)?.size ?? 0;
+  const rootCount = (keys: string[]) => keys.filter((k) => data.get(k)?.root).length;
+  const hubOf = (keys: string[]) => {
+    const roots = keys.filter((k) => data.get(k)?.root);
+    return (roots.length ? roots : keys).reduce((a, b) => (degree(b) > degree(a) ? b : a));
+  };
+  // Biggest first; with a root topic before loose ones of the same size.
+  groups.sort((a, b) => b.length - a.length || rootCount(b) - rootCount(a));
+
+  const scale = linkDistance / 80;
+  const radius = (size: number) => 24 + 36 * Math.sqrt(size) * scale;
+  const gap = 30 + 70 * scale;
+  const clusters: Cluster[] = [];
+  const placed: { x: number; y: number; r: number }[] = [];
+  const singles: string[][] = [];
+  for (const keys of groups) {
+    if (keys.length === 1 && placed.length > 0) {
+      singles.push(keys);
+      continue;
+    }
+    const r = radius(keys.length);
+    let at = { x: 0, y: 0 };
+    if (placed.length) {
+      // Walks a spiral out from the middle until the cluster fits.
+      for (let t = 0; ; t += 0.35) {
+        const d = placed[0]!.r + r + gap + t * 14;
+        const c = { x: Math.cos(t * 2.4) * d, y: Math.sin(t * 2.4) * d };
+        if (placed.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= p.r + r + gap)) {
+          at = c;
+          break;
+        }
+      }
+    }
+    placed.push({ ...at, r });
+    clusters.push({ keys, hub: hubOf(keys), ...at });
+  }
+  if (singles.length) {
+    // Lone items: a ring around everything else (Obsidian's orphans).
+    const outer = Math.max(...placed.map((p) => Math.hypot(p.x, p.y) + p.r)) + gap;
+    singles.forEach((keys, i) => {
+      const a = (i / singles.length) * Math.PI * 2;
+      const ring = outer + (i % 3) * 22;
+      clusters.push({ keys, hub: keys[0]!, x: Math.cos(a) * ring, y: Math.sin(a) * ring });
+    });
+  }
+  const byKey = new Map<string, Cluster>();
+  for (const c of clusters) for (const k of c.keys) byKey.set(k, c);
+  return { clusters, byKey };
+}
+
+/** Pulls each node to its cluster's center; the root topic it is centered on is held there firmly. */
+function applyCentering(sim: Simulation<SimNode, SimLink>, strength: number) {
+  const of = (n: SimNode) => (n.hub && n.degree > 0 ? Math.max(0.35, strength * 4) : strength);
+  (sim.force('x') as ReturnType<typeof forceX<SimNode>>).x((n) => n.cx).strength(of);
+  (sim.force('y') as ReturnType<typeof forceY<SimNode>>).y((n) => n.cy).strength(of);
+}
+
 export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGraph(props, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const propsRef = useRef(props);
@@ -139,6 +233,8 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
     colors: ReturnType<typeof makeColorResolver>;
     connecting: { from: string; x: number; y: number } | null;
     fitted: boolean;
+    /** The main cluster, framed when the graph opens. */
+    main: Cluster | null;
     width: number;
     height: number;
   } | null>(null);
@@ -336,23 +432,29 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
     if (e.hoverFade !== target) e.frame = requestAnimationFrame(draw);
   }
 
-  const fit = (animate = false) => {
+  /** Frames the whole graph, or one cluster centered on its root topic. */
+  const fit = (animate = false, only?: Cluster | null) => {
     const e = engine.current;
     if (!e || e.nodes.size === 0) return;
+    const list = only ? only.keys.map((k) => e.nodes.get(k)).filter((n): n is SimNode => !!n) : [...e.nodes.values()];
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const n of e.nodes.values()) {
+    for (const n of list) {
       minX = Math.min(minX, n.x ?? 0);
       minY = Math.min(minY, n.y ?? 0);
       maxX = Math.max(maxX, n.x ?? 0);
       maxY = Math.max(maxY, n.y ?? 0);
     }
+    const hub = only ? e.nodes.get(only.hub) : undefined;
+    const cx = hub ? (hub.x ?? 0) : (minX + maxX) / 2;
+    const cy = hub ? (hub.y ?? 0) : (minY + maxY) / 2;
+    const w = hub ? 2 * Math.max(cx - minX, maxX - cx) : maxX - minX;
+    const h = hub ? 2 * Math.max(cy - minY, maxY - cy) : maxY - minY;
     const pad = propsRef.current.compact ? 30 : 60;
-    const k = Math.max(MIN_ZOOM, Math.min(propsRef.current.compact ? 1.6 : 1.4, Math.min((e.width - pad * 2) / (maxX - minX || 1), (e.height - pad * 2) / (maxY - minY || 1))));
-    const target = { k, x: e.width / 2 - ((minX + maxX) / 2) * k, y: e.height / 2 - ((minY + maxY) / 2) * k };
-    animateView(target, animate ? 350 : 0);
+    const k = Math.max(MIN_ZOOM, Math.min(propsRef.current.compact ? 1.6 : 1.4, Math.min((e.width - pad * 2) / (w || 1), (e.height - pad * 2) / (h || 1))));
+    animateView({ k, x: e.width / 2 - cx * k, y: e.height / 2 - cy * k }, animate ? 350 : 0);
   };
 
   const animateView = (target: { x: number; y: number; k: number }, ms: number) => {
@@ -387,8 +489,8 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
       const e = engine.current;
       if (!e) return;
       for (const n of e.nodes.values()) {
-        n.x = (Math.random() - 0.5) * 400;
-        n.y = (Math.random() - 0.5) * 400;
+        n.x = n.cx + (Math.random() - 0.5) * 300;
+        n.y = n.cy + (Math.random() - 0.5) * 300;
       }
       e.sim.alpha(1).restart();
       e.fitted = false;
@@ -402,8 +504,8 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
       .force('link', forceLink<SimNode, SimLink>([]).id((d) => d.key))
       .force('charge', forceManyBody<SimNode>().distanceMax(900))
       .force('collide', forceCollide<SimNode>((n) => radiusOf(n, propsRef.current.settings.nodeSize) + 2))
-      .force('x', forceX<SimNode>(0))
-      .force('y', forceY<SimNode>(0))
+      .force('x', forceX<SimNode>((n) => n.cx))
+      .force('y', forceY<SimNode>((n) => n.cy))
       .alphaDecay(0.025)
       .velocityDecay(0.35);
     engine.current = {
@@ -419,15 +521,16 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
       colors: makeColorResolver(),
       connecting: null,
       fitted: false,
+      main: null,
       width: 0,
       height: 0,
     };
     sim.on('tick', () => {
       const e = engine.current!;
-      // Frame the graph once the first layout has settled a little.
+      // Once the first layout has settled a little, frame the main cluster centered on its root topic.
       if (!e.fitted && sim.alpha() < 0.35 && e.width > 0) {
         e.fitted = true;
-        fit(true);
+        fit(true, e.main);
       }
       requestDraw();
     });
@@ -480,30 +583,40 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
       neighbours.get(l.source)!.add(l.target);
       neighbours.get(l.target)!.add(l.source);
     }
+    const { clusters, byKey } = layoutClusters(props.nodes, neighbours, propsRef.current.settings.linkDistance);
     for (const n of props.nodes) {
+      const c = byKey.get(n.key)!;
       const old = prev.get(n.key);
       if (old) {
         old.data = n;
         old.degree = neighbours.get(n.key)!.size;
+        old.cx = c.x;
+        old.cy = c.y;
+        old.hub = c.hub === n.key;
         next.set(n.key, old);
         continue;
       }
       const anchor = [...neighbours.get(n.key)!].map((k) => prev.get(k) ?? next.get(k)).find(Boolean);
       const angle = Math.random() * Math.PI * 2;
-      const dist = anchor ? 30 : 60 + Math.random() * 200;
+      const dist = anchor ? 30 : c.keys.length === 1 ? 0 : 20 + Math.random() * 120;
       next.set(n.key, {
         key: n.key,
         data: n,
         degree: neighbours.get(n.key)!.size,
-        x: (anchor?.x ?? 0) + Math.cos(angle) * dist,
-        y: (anchor?.y ?? 0) + Math.sin(angle) * dist,
+        cx: c.x,
+        cy: c.y,
+        hub: c.hub === n.key,
+        x: (anchor?.x ?? c.x) + Math.cos(angle) * dist,
+        y: (anchor?.y ?? c.y) + Math.sin(angle) * dist,
       });
     }
     const links: SimLink[] = edges.map((l) => ({ source: l.source, target: l.target, data: l }));
     e.nodes = next;
     e.neighbours = neighbours;
+    e.main = clusters[0] ?? null;
     e.sim.nodes([...next.values()]);
     (e.sim.force('link') as ForceLink<SimNode, SimLink>).links(links);
+    applyCentering(e.sim, propsRef.current.settings.centerForce);
     e.links = links;
     if (e.hover && !next.has(e.hover)) e.hover = null;
     const fresh = prev.size === 0;
@@ -527,8 +640,7 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
     const s = props.settings;
     (e.sim.force('charge') as ReturnType<typeof forceManyBody<SimNode>>).strength(-s.repelForce * 28);
     (e.sim.force('link') as ForceLink<SimNode, SimLink>).distance(s.linkDistance).strength(s.linkForce);
-    (e.sim.force('x') as ReturnType<typeof forceX<SimNode>>).strength(s.centerForce);
-    (e.sim.force('y') as ReturnType<typeof forceY<SimNode>>).strength(s.centerForce);
+    applyCentering(e.sim, s.centerForce);
     (e.sim.force('collide') as ReturnType<typeof forceCollide<SimNode>>).radius((n) => radiusOf(n, s.nodeSize) + 2);
     e.sim.alpha(Math.max(e.sim.alpha(), 0.3)).restart();
     requestDraw();

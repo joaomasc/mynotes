@@ -7,6 +7,8 @@ import { cn } from '@/lib/cn';
 import { endpoints } from '@/lib/api/endpoints';
 import { EntityIcon, entityPath } from '@/lib/entities';
 import { qk } from '@/lib/query';
+import { openModeOf, workspace } from '../workspace/store';
+import { usePane } from '../workspace/tab-info';
 
 export interface MindNodeData extends Record<string, unknown> {
   label: string;
@@ -32,6 +34,7 @@ function NoteCard({ id }: { id: string }) {
 
 export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps<MindFlowNode>) {
   const { updateNodeData } = useReactFlow();
+  const pane = usePane();
   const [draft, setDraft] = useState(data.label);
   const input = useRef<HTMLTextAreaElement>(null);
 
@@ -87,8 +90,14 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
       {data.ref && (
         <Link
           to={entityPath(data.ref.type, data.ref.id)}
+          onClick={(e) => {
+            // Opens beside the map, which stays where it is (Ctrl+click etc. keep their meaning).
+            if (!pane || openModeOf(e) !== 'same') return;
+            e.preventDefault();
+            workspace.openBeside(entityPath(data.ref!.type, data.ref!.id), pane.paneId);
+          }}
           className="nodrag mt-1.5 flex items-center gap-1 truncate text-xs text-muted hover:text-accent"
-          title="Abrir item vinculado"
+          title={pane ? 'Abrir item vinculado ao lado' : 'Abrir item vinculado'}
         >
           <EntityIcon type={data.ref.type} className="size-3" />
           <span className="truncate">{data.ref.title ?? 'Item vinculado'}</span>

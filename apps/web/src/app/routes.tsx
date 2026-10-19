@@ -16,6 +16,7 @@ export const pageRoutes: RouteObject[] = [
   { path: 'library/:id', ...page(() => import('@/features/documents/document-page')) },
   { path: 'readings', ...page(() => import('@/features/readings/readings-page')) },
   { path: 'readings/:id', ...page(() => import('@/features/readings/reading-page')) },
+  { path: 'readings/:id/panel', ...page(() => import('@/features/readings/reading-panel-page')) },
   { path: 'plans', ...page(() => import('@/features/plans/plans-page')) },
   { path: 'plans/:id', ...page(() => import('@/features/plans/plan-page')) },
   { path: 'study', ...page(() => import('@/features/study/study-page')) },

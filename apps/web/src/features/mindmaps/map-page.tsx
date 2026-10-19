@@ -38,6 +38,7 @@ import { qk } from '@/lib/query';
 import { EntityPicker } from '../shared/entity-picker';
 import { FavoriteButton } from '../shared/favorite-button';
 import { useRecordView } from '../shared/use-view';
+import { chainOf } from './chain';
 import { fromFlow, shortId, toFlow, treeLayout } from './convert';
 import { MindNode, type MindFlowNode } from './mind-node';
 
@@ -129,6 +130,26 @@ function Editor({ map }: { map: MindMap }) {
 
   const selected = nodes.filter((n) => n.selected);
   const one = selected.length === 1 ? selected[0]! : null;
+
+  // One selected node lights its chain: path to the root, branch below, other links followed one after another.
+  const oneId = one && !one.data.editing ? one.id : null;
+  // Moving nodes doesn't change the chain: only the parent links do.
+  const structure = nodes.map((n) => `${n.id}>${n.data.parentId ?? ''}`).join('|');
+  const parentOf = useMemo(() => new Map(structure.split('|').map((s) => s.split('>') as [string, string])), [structure]);
+  const isTreeEdge = useCallback((e: { source: string; target: string }) => parentOf.get(e.target) === e.source, [parentOf]);
+  const chain = useMemo(() => (oneId ? chainOf(oneId, (id) => parentOf.get(id) || null, edges, isTreeEdge) : null), [oneId, parentOf, edges, isTreeEdge]);
+  const shownNodes = useMemo(() => (chain ? nodes.map((n) => (chain.nodes.has(n.id) ? n : { ...n, className: 'opacity-30 transition-opacity' })) : nodes), [nodes, chain]);
+  const shownEdges = useMemo(
+    () =>
+      chain
+        ? edges.map((e) =>
+            chain.edges.has(e.id)
+              ? { ...e, zIndex: 1, animated: !isTreeEdge(e), style: { ...e.style, stroke: 'var(--accent)', strokeWidth: 3 } }
+              : { ...e, style: { ...e.style, opacity: 0.12 } },
+          )
+        : edges,
+    [edges, chain, isTreeEdge],
+  );
 
   const addNode = (parent: MindFlowNode | null, asSibling = false) => {
     const base = asSibling && parent?.data.parentId ? nodes.find((n) => n.id === parent.data.parentId) ?? null : parent;
@@ -343,8 +364,8 @@ function Editor({ map }: { map: MindMap }) {
         onDrop={(e) => void onDrop(e)}
       >
         <ReactFlow
-          nodes={nodes}
-          edges={edges}
+          nodes={shownNodes}
+          edges={shownEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}

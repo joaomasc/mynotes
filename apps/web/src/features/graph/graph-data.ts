@@ -152,6 +152,8 @@ export function buildView(graph: Graph, o: ViewOptions): { nodes: FGNode[]; edge
       color: isTag ? 'var(--accent)' : (group?.color ?? nodeColor(n)),
       dashed: isBookNote(n),
       shape: isTag ? 'tag' : undefined,
+      // Top of the hierarchy shown (a topic whose parent is not in the graph): clusters are centered on it.
+      root: n.type === 'topic' && !isTag && !(n.topicId && source.has(`topic:${n.topicId}`)),
     });
   }
   return { nodes, edges, source, edgeSource };

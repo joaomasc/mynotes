@@ -34,6 +34,7 @@ const ENTITY_ROUTES: [string, EntityType][] = [
   ['/topics/:id/map', 'topic'],
   ['/topics/:id', 'topic'],
   ['/library/:id', 'document'],
+  ['/readings/:id/panel', 'reading'],
   ['/readings/:id', 'reading'],
   ['/plans/:id', 'plan'],
   ['/maps/:id', 'mindmap'],
@@ -48,7 +49,7 @@ export function pathTarget(path: string): PathTarget {
     // A book's page annotation opened inside the book: the annotation is what is shown.
     const annotation = type === 'reading' ? new URLSearchParams(search).get('annotation') : null;
     if (annotation) return { entity: { type: 'note', id: annotation }, fixed: null, icon: 'reading' };
-    return { entity: { type, id: m.params.id }, fixed: pattern.endsWith('/map') ? 'map' : null, icon: type };
+    return { entity: { type, id: m.params.id }, fixed: pattern.endsWith('/map') ? 'map' : pattern.endsWith('/panel') ? 'panel' : null, icon: type };
   }
   const fixed = FIXED.find(([p]) => p === pathname);
   return { entity: null, fixed: fixed?.[1] ?? 'MyNotes', icon: fixed?.[2] ?? 'home' };
@@ -93,6 +94,7 @@ export function usePathTitle(path: string, fallback?: string): { title: string; 
   } else {
     const t = data?.title ?? data?.name;
     title = t === undefined ? (fallback ?? '…') : t || 'Sem título';
+    if (target.fixed === 'panel' && t !== undefined) title = `Anotações · ${title}`;
   }
   return { title, icon: target.icon, target };
 }
