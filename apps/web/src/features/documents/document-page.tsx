@@ -51,7 +51,7 @@ function Preview({ doc }: { doc: DocumentMeta }) {
       />
     );
   }
-  if (preview === 'pdf') return <DocumentPdf doc={doc} className="h-[calc(100dvh-14rem)] min-h-[420px] overflow-hidden rounded-xl border border-border" />;
+  if (preview === 'pdf') return <DocumentPdf doc={doc} className="h-[calc(var(--view-h)-14rem)] min-h-[420px] overflow-hidden rounded-xl border border-border" />;
   if (file.isLoading) return <DownloadProgress fraction={fraction} />;
   if (file.isError || !file.data) return <ErrorState error={file.error} onRetry={() => void file.refetch()} />;
   if (preview === 'image') {

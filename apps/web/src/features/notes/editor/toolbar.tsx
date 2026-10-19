@@ -1,11 +1,13 @@
 import { useEditorState, type Editor } from '@tiptap/react';
 import {
   Bold,
+  BookOpenText,
   Code,
   Heading1,
   Heading2,
   Heading3,
   Italic,
+  LayoutTemplate,
   Link,
   Link2,
   List,
@@ -15,6 +17,7 @@ import {
   Minus,
   Quote,
   Redo2,
+  SlidersHorizontal,
   SquareCode,
   Strikethrough,
   Undo2,
@@ -85,11 +88,17 @@ export function EditorToolbar({
   editor,
   onLink,
   onInternalLink,
+  onTemplate,
+  onReading,
   dictation,
 }: {
   editor: Editor;
   onLink: () => void;
   onInternalLink: () => void;
+  /** Insert a template at the cursor (full note pages). */
+  onTemplate?: () => void;
+  /** Switch to reading mode (full note pages). */
+  onReading?: () => void;
   /** Absent when the browser cannot record. */
   dictation?: Dictation | null;
 }) {
@@ -182,6 +191,31 @@ export function EditorToolbar({
       <ToolButton label="Link para nota, assunto ou documento" shortcut="Ctrl+Shift+K" onClick={onInternalLink}>
         <Link2 className={i} />
       </ToolButton>
+      <Sep />
+      <ToolButton
+        label="Propriedades da nota (status, prazo, fonte…)"
+        onClick={() => {
+          const first = editor.state.doc.firstChild;
+          if (first?.type.name === 'properties') return;
+          editor
+            .chain()
+            .focus()
+            .insertContentAt(0, { type: 'properties', attrs: { items: [{ key: 'status', value: '' }] } })
+            .run();
+        }}
+      >
+        <SlidersHorizontal className={i} />
+      </ToolButton>
+      {onTemplate && (
+        <ToolButton label="Inserir modelo" shortcut="Alt+Shift+M" onClick={onTemplate}>
+          <LayoutTemplate className={i} />
+        </ToolButton>
+      )}
+      {onReading && (
+        <ToolButton label="Modo de leitura" shortcut="Ctrl+E" onClick={onReading}>
+          <BookOpenText className={i} />
+        </ToolButton>
+      )}
     </div>
   );
 }

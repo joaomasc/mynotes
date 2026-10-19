@@ -1,8 +1,16 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from 'react';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { NOTE_TITLE_MAX, asRichTextDoc, parseInternalHref, type RichTextDoc } from '@mynotes/shared';
+import { NOTE_TITLE_MAX, asRichTextDoc, parseInternalHref, type Note, type RichTextDoc } from '@mynotes/shared';
+import { BookOpenText, PencilLine } from 'lucide-react';
+import { activeEditor } from '@/lib/active-editor';
+import { cn } from '@/lib/cn';
 import { entityPath } from '@/lib/entities';
+import { effectiveHotkey, eventToHotkey, formatHotkey, getHotkeyOverrides } from '@/lib/hotkeys';
+import { READING_WIDTHS, usePref, useReadingWidth } from '@/lib/prefs';
+import { openModeOf, openPath } from '../../workspace/store';
+import { openTemplatePicker } from '../template-picker';
 import { dictationSupported } from '@/lib/dictation/recorder';
 import { notesSync, writeEmergencyDraft, type SaveState } from '@/lib/sync/notes-sync';
 import { Dictation } from './dictation';
@@ -86,6 +94,14 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
   const localTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [linkDialog, setLinkDialog] = useState<'external' | 'internal' | null>(null);
+  const [readingWidth] = useReadingWidth();
+  const [defaultMode] = usePref<'edit' | 'read'>('mynotes:note-mode', 'edit');
+  // Reading mode (Ctrl+E): the text can't be changed and links open with a plain click. Full note pages only.
+  const [reading, setReading] = useState(() => !compact && defaultMode === 'read' && !autoFocusTitle);
+  const toggleReading = useRef<() => void>(() => undefined);
+  toggleReading.current = () => {
+    if (!compact) setReading((r) => !r);
+  };
 
   const editorRef = useRef<Editor | null>(null);
 
@@ -126,9 +142,9 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
         'aria-label': 'Conteúdo da nota',
         spellcheck: 'true',
       },
-      handleClick: (_view, _pos, event) => {
+      handleClick: (view, _pos, event) => {
         const tag = (event.target as HTMLElement).closest('[data-tag]')?.getAttribute('data-tag');
-        if (tag && (event.ctrlKey || event.metaKey)) {
+        if (tag && (event.ctrlKey || event.metaKey || !view.editable)) {
           event.preventDefault();
           void navigate(`/search?tag=${encodeURIComponent(tag)}`);
           return true;
@@ -139,10 +155,13 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
         const internal = parseInternalHref(href);
         if (internal) {
           event.preventDefault();
-          void navigate(entityPath(internal.type, internal.id));
+          const path = entityPath(internal.type, internal.id);
+          const mode = openModeOf(event);
+          if (mode === 'same') void navigate(path);
+          else openPath(path, mode);
           return true;
         }
-        if (event.ctrlKey || event.metaKey) {
+        if (event.ctrlKey || event.metaKey || !view.editable) {
           event.preventDefault();
           window.open(href, '_blank', 'noopener,noreferrer');
           return true;
@@ -150,6 +169,13 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
         return false;
       },
       handleKeyDown: (_view, event) => {
+        // The reading-mode shortcut wins over the editor's own (Ctrl+E is also "inline code").
+        const hotkey = eventToHotkey(event);
+        if (!compact && hotkey && hotkey === effectiveHotkey('editor.reading', 'Ctrl+E', getHotkeyOverrides())) {
+          event.preventDefault();
+          toggleReading.current();
+          return true;
+        }
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
           event.preventDefault();
           setLinkDialog(event.shiftKey ? 'internal' : 'external');
@@ -161,6 +187,68 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
     onUpdate: changed,
   });
   editorRef.current = editor;
+
+  // The same note may be open in another pane: while this editor isn't being used, it follows the
+  // other one's edits (its local draft, then what the server saved), so it never writes back stale text.
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!editor) return;
+    const idle = () => !dirty.current && !editor.isFocused && document.activeElement !== titleInput.current;
+    const apply = (nextTitle: string, content: RichTextDoc) => {
+      if (!idle() || editor.isDestroyed) return;
+      if (titleRef.current === nextTitle && JSON.stringify(docOf(editor)) === JSON.stringify(asRichTextDoc(content))) return;
+      titleRef.current = nextTitle;
+      setTitle(nextTitle);
+      editor.commands.setContent(content.content?.length ? content : BLANK, { emitUpdate: false });
+    };
+    const offDraft = notesSync.subscribe(noteId, () => {
+      if (!idle()) return;
+      void notesSync.getDraft(noteId).then((d) => d && d.status !== 'conflict' && apply(d.title, d.content));
+    });
+    const offCache = qc.getQueryCache().subscribe((event) => {
+      const key = event.query.queryKey;
+      if (event.type !== 'updated' || key[0] !== 'note' || key[1] !== noteId) return;
+      const saved = event.query.state.data as Note | undefined;
+      // A server copy only replaces the text when nothing local is waiting to be sent.
+      if (saved && notesSync.state(noteId) === 'saved') apply(saved.title, saved.content);
+    });
+    return () => {
+      offDraft();
+      offCache();
+    };
+  }, [editor, noteId, qc]);
+
+  // Commands from the palette and the keyboard act on the last editor used.
+  const register = useCallback(() => {
+    if (!editor) return;
+    activeEditor.set({
+      editor,
+      noteId,
+      title: () => titleRef.current,
+      topicId: topicId ?? null,
+      toggleReading: compact ? undefined : () => toggleReading.current(),
+    });
+  }, [editor, noteId, topicId, compact]);
+  useEffect(() => {
+    if (!editor) return;
+    if (!compact) register();
+    editor.on('focus', register);
+    return () => {
+      editor.off('focus', register);
+      activeEditor.clear(editor);
+    };
+  }, [editor, register, compact]);
+
+  const shownMode = useRef(reading);
+  useEffect(() => {
+    if (!editor || compact) return;
+    // Without emitting an update: switching modes is not an edit (it must never save the note).
+    if (editor.isEditable === reading) editor.setEditable(!reading, false);
+    // Back to editing: the cursor goes to the text. Never on mount (it would take focus from other panes).
+    if (shownMode.current === reading) return;
+    shownMode.current = reading;
+    if (!reading) editor.commands.focus();
+  }, [editor, reading, compact]);
 
   // Speech to text, where the browser can record (see dictation.ts).
   const [dictation] = useState(() => (dictationSupported() ? new Dictation() : null));
@@ -259,21 +347,40 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
             />
             {dictation && <DictationBar dictation={dictation} />}
           </div>
+        ) : reading ? (
+          <div className="sticky top-[calc(3.25rem+env(safe-area-inset-top))] z-20 -mx-4 flex items-center gap-2 border-b border-border bg-bg/95 px-4 py-1.5 text-xs text-muted backdrop-blur sm:-mx-6 sm:px-6 lg:top-0 lg:-mx-8 lg:px-8">
+            <BookOpenText className="size-4" aria-hidden />
+            <span className="flex-1">Modo de leitura</span>
+            <button
+              type="button"
+              onClick={() => setReading(false)}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 font-medium text-accent hover:bg-accent-soft"
+            >
+              <PencilLine className="size-3.5" /> Editar
+              <span className="text-subtle">{formatHotkey(effectiveHotkey('editor.reading', 'Ctrl+E', getHotkeyOverrides()) ?? '')}</span>
+            </button>
+          </div>
         ) : (
           <div className="sticky top-[calc(3.25rem+env(safe-area-inset-top))] z-20 -mx-4 border-b border-border bg-bg/95 px-3 py-1.5 backdrop-blur sm:-mx-6 sm:px-5 lg:top-0 lg:-mx-8 lg:px-7">
             <EditorToolbar
               editor={editor}
               onLink={() => setLinkDialog('external')}
               onInternalLink={() => setLinkDialog('internal')}
+              onTemplate={() => {
+                register();
+                openTemplatePicker();
+              }}
+              onReading={() => setReading(true)}
               dictation={dictation}
             />
             {dictation && <DictationBar dictation={dictation} />}
           </div>
         ))}
-      <div className={compact ? '' : wide ? 'mx-auto max-w-5xl' : 'mx-auto max-w-[46rem]'}>
+      <div className={compact ? '' : cn('mx-auto', wide ? 'max-w-5xl' : READING_WIDTHS[readingWidth].className, reading && 'note-reading')}>
         <textarea
           hidden={hideTitle}
           ref={titleInput}
+          readOnly={reading}
           value={title}
           rows={1}
           maxLength={NOTE_TITLE_MAX}

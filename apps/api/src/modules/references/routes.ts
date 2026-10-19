@@ -1,5 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import {
+  zBrokenReference,
   zReference,
   zReferenceResolveQuery,
   zReferenceSuggestQuery,
@@ -26,6 +27,18 @@ export function referenceRoutes(app: ApiApp) {
       responses: { 200: ok(z.array(zReference)), ...errors },
     }),
     async (c) => c.json({ data: await refs.suggest(c.env.DB, c.get('userId'), c.req.valid('query')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/references/broken',
+      tags,
+      summary: 'Referências quebradas em todas as notas (alvo excluído ou na lixeira)',
+      security: secured,
+      responses: { 200: ok(z.array(zBrokenReference)), ...errors },
+    }),
+    async (c) => c.json({ data: await refs.brokenReferences(c.env.DB, c.get('userId')) }, 200),
   );
 
   app.openapi(

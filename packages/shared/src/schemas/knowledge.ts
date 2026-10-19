@@ -253,6 +253,8 @@ export const zGraphNode = z.object({
   topicId: zId.nullable(),
   /** For notes: whether it is a note, a book review or a page annotation. */
   role: zNoteRole.nullable(),
+  /** When the item was created (graph timeline). */
+  createdAt: zDateTime.optional(),
 });
 export type GraphNode = z.infer<typeof zGraphNode>;
 
@@ -270,6 +272,8 @@ export const zGraph = z.object({
   nodes: z.array(zGraphNode),
   edges: z.array(zGraphEdge),
   truncated: z.boolean(),
+  /** #tags of the notes in the graph (can be drawn as nodes). */
+  tags: z.array(z.object({ tag: z.string(), noteIds: z.array(zId) })).optional(),
 });
 export type Graph = z.infer<typeof zGraph>;
 
@@ -386,6 +390,19 @@ export const zReferenceResolveQuery = z.object({
   refs: z.string().max(5000),
 });
 
+/** A reference written in a note whose target was deleted or sent to the trash. */
+export const zBrokenReference = z.object({
+  noteId: zId,
+  noteTitle: z.string(),
+  topicId: zId.nullable(),
+  role: zNoteRole,
+  readingId: zId.nullable(),
+  page: z.number().int().nullable(),
+  targetType: zGraphEntityType,
+  targetId: zId,
+});
+export type BrokenReference = z.infer<typeof zBrokenReference>;
+
 export const zTagListQuery = z.object({
   q: z.string().trim().max(60).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -493,8 +510,22 @@ export const zStudyGoals = z.object({
   weeklyMinutes: z.number().int().min(0).max(100 * 60).default(0),
 });
 
+/** Note workflow: daily notes and templates (synced across devices). */
+export const zNoteSettings = z.object({
+  /** Topic where daily notes are created (null = no topic). */
+  dailyTopicId: zId.nullable().default(null),
+  /** Title of the daily note: YYYY, MM, DD tokens. */
+  dailyFormat: z.string().trim().min(1).max(60).default('YYYY-MM-DD'),
+  /** Note whose content starts each daily note. */
+  dailyTemplateId: zId.nullable().default(null),
+  /** Topic whose notes are offered as templates. */
+  templatesTopicId: zId.nullable().default(null),
+});
+export type NoteSettings = z.infer<typeof zNoteSettings>;
+
 export const SETTINGS_SCHEMAS = {
   ui: zUiSettings,
+  notes: zNoteSettings,
   study_timer: zStudyTimer,
   study_goals: zStudyGoals,
 } as const;

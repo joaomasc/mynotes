@@ -160,8 +160,16 @@ test('a book with PDF, page annotations and a review, kept across sessions', asy
 test('graph and mind map are generated from the data; moving nodes keeps the hierarchy', async ({ page }) => {
   await openTopic(page, 'Mercantilismo europeu K');
   await page.getByRole('main').getByRole('link', { name: 'Grafo' }).click();
-  await expect(page.locator('.react-flow').getByText('Mercantilismo europeu K')).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.react-flow').getByText('Juros e preços K')).toBeVisible();
+  // The graph is drawn on a canvas: items are found with "Localizar" and shown in the selection panel.
+  await expect(page.getByRole('img', { name: /Grafo/ })).toBeVisible({ timeout: 20_000 });
+  const find = page.getByLabel('Localizar no grafo');
+  const selected = page.getByRole('complementary', { name: 'Item selecionado' });
+  await find.fill('Mercantilismo europeu K');
+  await find.press('Enter');
+  await expect(selected).toContainText('Mercantilismo europeu K');
+  await find.fill('Juros e preços K');
+  await find.press('Enter');
+  await expect(selected).toContainText('Juros e preços K');
 
   await openTopic(page, 'Economia K');
   await page.getByRole('main').getByRole('link', { name: 'Mapa' }).click();

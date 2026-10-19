@@ -57,7 +57,7 @@ export async function buildGraph(
     const src = GRAPH_SOURCES[type];
     const extra =
       type === 'note' ? ', role, reading_id, page, (SELECT r.title FROM readings r WHERE r.id = notes.reading_id) AS reading_title' : '';
-    let sql = `SELECT id, ${src.title} AS title, ${src.topic} AS topic_id${extra} FROM ${src.table} WHERE user_id = ?`;
+    let sql = `SELECT id, ${src.title} AS title, ${src.topic} AS topic_id, created_at${extra} FROM ${src.table} WHERE user_id = ?`;
     const binds: Bindable[] = [userId];
     if (src.trashable) sql += ' AND deleted_at IS NULL';
     if (q.topicId) {
@@ -80,6 +80,14 @@ export async function buildGraph(
     stmt(
       db,
       `SELECT l.note_id, l.target_type, l.target_id FROM note_links l JOIN notes n ON n.id = l.note_id
+        WHERE n.user_id = ? AND n.deleted_at IS NULL LIMIT 5000`,
+      userId,
+    ),
+  );
+  statements.push(
+    stmt(
+      db,
+      `SELECT t.note_id, t.tag FROM note_tags t JOIN notes n ON n.id = t.note_id
         WHERE n.user_id = ? AND n.deleted_at IS NULL LIMIT 5000`,
       userId,
     ),
@@ -111,6 +119,7 @@ export async function buildGraph(
         label: str(r.title) || fallback,
         topicId: strOrNull(r.topic_id),
         role,
+        createdAt: str(r.created_at),
       });
       if (role && role !== 'note' && r.reading_id) annotates.push({ note: key, reading: entityKey('reading', str(r.reading_id)) });
     }
@@ -176,7 +185,13 @@ export async function buildGraph(
       label: '',
     });
   }
-  return { nodes: [...nodes.values()], edges: [...edges.values()], truncated };
+  const byTag = new Map<string, string[]>();
+  for (const t of results[types.length + 2]?.results ?? []) {
+    if (!nodes.has(entityKey('note', str(t.note_id)))) continue;
+    byTag.set(str(t.tag), [...(byTag.get(str(t.tag)) ?? []), str(t.note_id)]);
+  }
+  const tags = [...byTag].map(([tag, noteIds]) => ({ tag, noteIds }));
+  return { nodes: [...nodes.values()], edges: [...edges.values()], truncated, tags };
 }
 
 /* -------------------------------------------------------------- favorites */

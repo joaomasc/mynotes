@@ -3,6 +3,7 @@ import { TaskList } from '@tiptap/extension-task-list';
 import { Placeholder } from '@tiptap/extensions';
 import StarterKit from '@tiptap/starter-kit';
 import { INTERNAL_LINK_PREFIX, isAllowedHref } from '@mynotes/shared';
+import { PropertiesNode } from './properties-node';
 import { ReferenceNode } from './reference-node';
 import { Triggers } from './triggers';
 
@@ -27,6 +28,8 @@ export function noteExtensions(placeholder: string) {
     // "/" references (stored by id) and "#" tags.
     ReferenceNode,
     Triggers,
+    // Key/value properties at the top of a note.
+    PropertiesNode,
   ];
 }
 

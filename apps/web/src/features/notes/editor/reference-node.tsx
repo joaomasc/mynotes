@@ -8,7 +8,21 @@ import { Menu } from '@/components/ui/menu';
 import { cn } from '@/lib/cn';
 import { ENTITY_CSS_VAR } from '@/lib/entities';
 import { referencePath, refSyntax, useReference } from '@/lib/references';
+import { openModeOf, openPath } from '../../workspace/store';
 import { EntityPicker } from '../../shared/entity-picker';
+
+/** URL fragment of a heading: lowercase, no accents, words joined by "-". */
+export function headingSlug(text: string): string {
+  return (
+    text
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'secao'
+  );
+}
 
 /**
  * A reference to another item, inserted with "/". Stored as
@@ -27,21 +41,32 @@ export const ReferenceNode = Node.create({
     return {
       href: { default: null },
       label: { default: '' },
+      /** A heading of the target note (`/nota.Título#Seção`), by its text. */
+      heading: { default: null },
     };
   },
   parseHTML() {
     return [
       {
         tag: 'a[data-reference]',
-        getAttrs: (el) => ({ href: el.getAttribute('href'), label: el.getAttribute('data-label') ?? el.textContent ?? '' }),
+        getAttrs: (el) => ({
+          href: el.getAttribute('href'),
+          label: el.getAttribute('data-label') ?? el.textContent ?? '',
+          heading: el.getAttribute('data-heading'),
+        }),
       },
     ];
   },
   renderHTML({ node, HTMLAttributes }) {
-    return ['a', mergeAttributes(HTMLAttributes, { 'data-reference': '', 'data-label': node.attrs.label }), `/${node.attrs.label}`];
+    const { heading, ...attrs } = HTMLAttributes as Record<string, unknown>;
+    return [
+      'a',
+      mergeAttributes(attrs, { 'data-reference': '', 'data-label': node.attrs.label, ...(heading ? { 'data-heading': heading } : {}) }),
+      `/${node.attrs.label}${heading ? `#${String(heading)}` : ''}`,
+    ];
   },
   renderText({ node }) {
-    return `/${node.attrs.label as string}`;
+    return `/${node.attrs.label as string}${node.attrs.heading ? `#${node.attrs.heading as string}` : ''}`;
   },
   addNodeView() {
     return ReactNodeViewRenderer(ReferenceView, { as: 'span', className: 'reference-wrapper' });
@@ -57,6 +82,11 @@ function ReferenceView({ node, editor, getPos, updateAttributes, deleteNode, sel
   const broken = !link || data?.exists === false;
   const text = broken || !data ? `/${label || 'referência'}` : refSyntax(data, link?.page);
   const color = link ? ENTITY_CSS_VAR[data?.type === 'note' && data.role !== 'note' ? 'reading' : link.type] : undefined;
+  const heading = typeof node.attrs.heading === 'string' && node.attrs.heading ? node.attrs.heading : null;
+  // Before the item is loaded, the link alone is enough (an annotation then opens as a note).
+  const path = link
+    ? referencePath(data ?? { type: link.type, id: link.id, role: null, readingId: null, page: null }, link.page) + (heading ? `#${headingSlug(heading)}` : '')
+    : null;
 
   const toText = () => {
     const pos = getPos();
@@ -74,12 +104,20 @@ function ReferenceView({ node, editor, getPos, updateAttributes, deleteNode, sel
       tabIndex={-1}
       title={broken ? 'Referência quebrada: o item foi excluído ou movido para a lixeira' : isError ? 'Sem conexão para confirmar o item' : undefined}
       data-broken={broken || undefined}
+      data-preview-href={!broken && path ? path : undefined}
       onClick={(e) => {
         if (broken) return; // the repair menu opens instead
         e.preventDefault();
         e.stopPropagation();
-        // Before the item is loaded, the link alone is enough (an annotation then opens as a note).
-        if (link) void navigate(referencePath(data ?? { type: link.type, id: link.id, role: null, readingId: null, page: null }, link.page));
+        if (!path) return;
+        const mode = openModeOf(e);
+        if (mode === 'same') void navigate(path);
+        else openPath(path, mode);
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 1 || broken || !path) return;
+        e.preventDefault();
+        openPath(path, 'tab');
       }}
       className={cn(
         'reference-chip cursor-pointer rounded px-1 py-px font-medium no-underline',
@@ -89,6 +127,7 @@ function ReferenceView({ node, editor, getPos, updateAttributes, deleteNode, sel
       style={broken ? undefined : { color, background: color ? `color-mix(in srgb, ${color} 12%, transparent)` : undefined }}
     >
       {text}
+      {heading && !broken && <span className="opacity-75">#{heading}</span>}
     </span>
   );
 

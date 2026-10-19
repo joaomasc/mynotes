@@ -81,7 +81,7 @@ function Reader({
   return (
     <DocumentPdf
       doc={doc}
-      className="h-[62dvh] overflow-hidden rounded-xl border border-border lg:h-[calc(100dvh-9rem)]"
+      className="h-[62dvh] overflow-hidden rounded-xl border border-border lg:h-[calc(var(--view-h)-9rem)]"
       initialPage={initialPage}
       goto={goto}
       onPageChange={onPage}

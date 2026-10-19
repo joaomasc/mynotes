@@ -76,6 +76,7 @@ const BLOCK_TYPES = new Set([
   'bulletList',
   'orderedList',
   'taskList',
+  'properties',
 ]);
 
 export interface InternalLink {
@@ -107,9 +108,10 @@ export function internalHref(type: InternalLinkType, id: string, page?: number |
 /**
  * Tags are written inline as `#name`. They start with a letter and follow the
  * start of the text, a space or punctuation, so `C#`, `#1`, `a/#b` and URL
- * fragments are not tags.
+ * fragments are not tags. `#historia/brasil` is a nested tag: searching
+ * `#historia` also finds it.
  */
-export const TAG_PATTERN = /(^|[\s([{"'“‘,;:!?.])#(\p{L}[\p{L}\p{N}_-]*)/gu;
+export const TAG_PATTERN = /(^|[\s([{"'“‘,;:!?.])#(\p{L}[\p{L}\p{N}_-]*(?:\/\p{L}[\p{L}\p{N}_-]*)*)/gu;
 
 /** Canonical form of a tag: lowercase and without accents ("#Crítica" → "critica"). */
 export function normalizeTag(name: string): string {
@@ -181,6 +183,14 @@ export function analyzeDoc(doc: RichTextNode): DocAnalysis {
       else if (node.attrs && 'href' in node.attrs) node.attrs.href = null;
       if (typeof node.attrs?.label === 'string') parts.push(node.attrs.label);
       tagText.push(' ');
+    }
+    // Note properties are searchable as "key: value" lines.
+    if (node.type === 'properties' && Array.isArray(node.attrs?.items)) {
+      for (const item of node.attrs.items as unknown[]) {
+        const p = item as { key?: unknown; value?: unknown } | null;
+        if (p && typeof p.key === 'string' && typeof p.value === 'string') parts.push(`${p.key}: ${p.value}\n`);
+      }
+      tagText.push('\n');
     }
     for (const child of node.content ?? []) visit(child, depth + 1, inCode || node.type === 'codeBlock');
     if (BLOCK_TYPES.has(node.type)) {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { Hash, Search } from 'lucide-react';
+import { Hash, Link2Off, Search } from 'lucide-react';
 import { SEARCH_ENTITY_TYPES, normalizeTag, type SearchResult } from '@mynotes/shared';
 import { EmptyState, ErrorState, ListSkeleton } from '@/components/ui/feedback';
 import { Card, Page, PageHeader } from '@/components/ui/layout';
@@ -12,7 +12,7 @@ import { relativeTime } from '@/lib/format';
 import { useDebounced } from '@/lib/hooks';
 import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
-import { backlinkLabel } from '../notes/note-page';
+import { backlinkLabel } from '../notes/backlink-list';
 import { TopicChip } from '../shared/topic-breadcrumb';
 
 /** Search filter: an entity type, or reading annotations (notes attached to a book page). */
@@ -85,6 +85,46 @@ function AllTags() {
   );
 }
 
+/** Notes whose "/" references point to deleted items, to repair them in the editor. */
+function BrokenReferences() {
+  const broken = useQuery({ queryKey: ['references-broken'], queryFn: endpoints.references.broken });
+  if (broken.isLoading) return <ListSkeleton rows={3} />;
+  if (broken.isError) return <ErrorState error={broken.error} onRetry={() => void broken.refetch()} />;
+  if (!broken.data?.length) {
+    return <EmptyState icon={<Link2Off />} title="Nenhuma referência quebrada" description="Todas as referências escritas com “/” apontam para itens que existem." />;
+  }
+  const byNote = new Map<string, typeof broken.data>();
+  for (const b of broken.data) byNote.set(b.noteId, [...(byNote.get(b.noteId) ?? []), b]);
+  return (
+    <>
+      <p className="mb-3 text-sm text-muted">
+        {broken.data.length} referência(s) em {byNote.size} nota(s) apontam para itens excluídos. Abra a nota e clique na referência riscada para escolher outro item ou mantê-la como texto.
+      </p>
+      <Card className="divide-y divide-border overflow-hidden">
+        {[...byNote.values()].map((list) => {
+          const b = list[0]!;
+          return (
+            <Link
+              key={b.noteId}
+              to={referencePath({ type: 'note', id: b.noteId, role: b.role, readingId: b.readingId, page: b.page })}
+              className="flex items-start gap-3 px-4 py-3 hover:bg-surface-2/60"
+            >
+              <Link2Off className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{b.noteTitle || 'Sem título'}</span>
+                <span className="text-xs text-muted">
+                  {list.length} referência(s) quebrada(s): {[...new Set(list.map((x) => entityLabel(x.targetType).toLowerCase()))].join(', ')}
+                </span>
+              </div>
+              {b.topicId && <TopicChip topicId={b.topicId} link={false} />}
+            </Link>
+          );
+        })}
+      </Card>
+    </>
+  );
+}
+
 export function Component() {
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState(params.get('q') ?? '');
@@ -143,7 +183,9 @@ export function Component() {
         />
       </div>
 
-      {tag ? (
+      {params.get('broken') === '1' && !debounced ? (
+        <BrokenReferences />
+      ) : tag ? (
         <TagResults tag={tag} />
       ) : params.get('tags') === '1' && !debounced ? (
         <AllTags />
@@ -181,6 +223,10 @@ export function Component() {
                   A busca ignora acentos e maiúsculas e considera todas as palavras. Use #tag para filtrar por tag ou{' '}
                   <Link to="/search?tags=1" className="text-accent hover:underline">
                     veja todas as tags
+                  </Link>
+                  . Também dá para{' '}
+                  <Link to="/search?broken=1" className="text-accent hover:underline">
+                    listar referências quebradas
                   </Link>
                   .
                 </>

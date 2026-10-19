@@ -282,3 +282,45 @@ describe('backup of the new data', () => {
     expect(ann.id).toBeTruthy();
   });
 });
+
+describe('obsidian-like additions', () => {
+  it('nested tags: a parent tag finds its children', async () => {
+    const a = await note('A', doc(text('Sobre #Historia/Brasil hoje')));
+    const b = await note('B', doc(text('Só #historia')));
+    await note('C', doc(text('Outra #historiografia')));
+    const ids = (await http.get('/notes?tag=historia')).body.data.map((x: { id: string }) => x.id).sort();
+    expect(ids).toEqual([a.id, b.id].sort());
+    expect((await http.get('/notes?tag=historia/brasil')).body.data.map((x: { id: string }) => x.id)).toEqual([a.id]);
+  });
+
+  it('lists broken references across notes', async () => {
+    const target = await note('Alvo');
+    const t = await topic('Assunto');
+    const source = await note('Fonte', doc(ref('note', target.id, 'Alvo'), text(' e '), ref('topic', t.id, 'Assunto')));
+    expect((await http.get('/references/broken')).body.data).toEqual([]);
+    await http.del(`/notes/${target.id}`);
+    const broken = (await http.get('/references/broken')).body.data;
+    expect(broken).toHaveLength(1);
+    expect(broken[0]).toMatchObject({ noteId: source.id, noteTitle: 'Fonte', targetType: 'note', targetId: target.id });
+  });
+
+  it('graph carries creation dates and the tags of its notes', async () => {
+    const n = await note('Com tag', doc(text('#revisar isto')));
+    const graph = (await http.get('/graph')).body.data;
+    const node = graph.nodes.find((x: { key: string }) => x.key === `note:${n.id}`);
+    expect(node.createdAt).toBe(n.createdAt);
+    expect(graph.tags).toEqual([{ tag: 'revisar', noteIds: [n.id] }]);
+  });
+
+  it('note properties are searchable as "key: value"', async () => {
+    const n = await note('Livro X', {
+      type: 'doc',
+      content: [
+        { type: 'properties', attrs: { items: [{ key: 'status', value: 'lendo agora' }] } },
+        { type: 'paragraph', content: [text('Corpo')] },
+      ],
+    });
+    const hits = (await http.get('/search?q=status%20lendo')).body.data.map((r: { id: string }) => r.id);
+    expect(hits).toContain(n.id);
+  });
+});

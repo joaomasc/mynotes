@@ -205,7 +205,7 @@ export const ANNOTATION_TYPE_LABELS: Record<AnnotationType, string> = {
 export const TAG_MAX_LENGTH = 50;
 export const NOTE_TAGS_MAX = 100;
 /** Bump when the derived indexes of notes (tags) change, to reindex old rows. */
-export const NOTE_INDEX_VERSION = 1;
+export const NOTE_INDEX_VERSION = 2;
 
 /** Internal link scheme used inside note content: `mynotes:note/<id>`. */
 export const INTERNAL_LINK_PREFIX = 'mynotes:';

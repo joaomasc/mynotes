@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EditorContent, useEditor } from '@tiptap/react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import {
@@ -11,14 +10,13 @@ import {
   Ellipsis,
   FileClock,
   FolderInput,
-  Hash,
   Info,
   PanelRightClose,
   RefreshCw,
   Trash,
   TriangleAlert,
 } from 'lucide-react';
-import { ANNOTATION_TYPE_LABELS, analyzeDoc, uuidv7, type Backlink, type Note, type NoteRevisionSummary, type RichTextDoc } from '@mynotes/shared';
+import { ANNOTATION_TYPE_LABELS, analyzeDoc, uuidv7, type Note, type NoteRevisionSummary, type RichTextDoc } from '@mynotes/shared';
 import { Button, IconButton } from '@/components/ui/button';
 import { Dialog, useConfirm } from '@/components/ui/dialog';
 import { EmptyState, ErrorState, PageLoader, Spinner } from '@/components/ui/feedback';
@@ -28,7 +26,7 @@ import { ApiError, errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
 import { dateTime, plural, relativeTime } from '@/lib/format';
-import { useLocalPreference, useMediaQuery } from '@/lib/hooks';
+import { useLocalPreference } from '@/lib/hooks';
 import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
 import { notesSync, type NoteDraft, type SaveState } from '@/lib/sync/notes-sync';
@@ -37,7 +35,10 @@ import { RelationsPanel } from '../shared/relations-panel';
 import { TopicBreadcrumb } from '../shared/topic-breadcrumb';
 import { useRecordView } from '../shared/use-view';
 import { TopicSelect } from '../topics/topic-dialogs';
-import { noteExtensions } from './editor/extensions';
+import { useWideView } from '../workspace/tab-info';
+import { headingSlug } from './editor/reference-node';
+import { BacklinkList, TagChips } from './backlink-list';
+import { ReadOnlyDoc } from './read-only-doc';
 import { NoteEditor, useSaveState, type NoteEditorHandle } from './editor/note-editor';
 import { justCreatedNotes } from './use-create-note';
 
@@ -59,11 +60,6 @@ function SaveStatus({ noteId }: { noteId: string }) {
       <span className="hidden sm:inline">{s.label}</span>
     </span>
   );
-}
-
-function ReadOnlyDoc({ content }: { content: RichTextDoc }) {
-  const editor = useEditor({ extensions: noteExtensions(''), content, editable: false, editorProps: { attributes: { class: 'prose-note' } } });
-  return <EditorContent editor={editor} />;
 }
 
 function RevisionsDialog({
@@ -185,67 +181,7 @@ function ConflictBanner({
   );
 }
 
-/** "Anotação · O Capital, p. 125" / "Resenha · O Capital": where a backlink comes from. */
-export function backlinkLabel(b: Pick<Backlink, 'role' | 'title' | 'readingTitle' | 'page'>): string {
-  if (b.role === 'annotation') return `Anotação · ${b.readingTitle ?? 'livro'}${b.page ? `, p. ${b.page}` : ''}${b.title ? ` — ${b.title}` : ''}`;
-  if (b.role === 'review') return `Resenha · ${b.readingTitle ?? 'livro'}`;
-  return b.title || 'Sem título';
-}
-
-export function BacklinkList({
-  items,
-  empty,
-  pageLink,
-}: {
-  items: Backlink[] | undefined;
-  empty: string;
-  /** For a book's backlinks: where each cited page leads. */
-  pageLink?: (page: number) => string;
-}) {
-  if (!items?.length) return <p className="text-xs text-muted">{empty}</p>;
-  return (
-    <ul className="space-y-1">
-      {items.map((b) => (
-        <li key={b.noteId}>
-          <Link
-            to={referencePath({ type: 'note', id: b.noteId, role: b.role, readingId: b.readingId, page: b.page })}
-            className="block rounded-lg px-1.5 py-1 text-sm hover:bg-surface-2"
-          >
-            <span className="block truncate">{backlinkLabel(b)}</span>
-            {b.excerpt && <span className="block truncate text-xs text-muted">{b.excerpt}</span>}
-          </Link>
-          {pageLink && !!b.citedPages?.length && (
-            <span className="flex flex-wrap gap-1 px-1.5 pb-1">
-              {b.citedPages.map((p) => (
-                <Link key={p} to={pageLink(p)} className="rounded-md bg-reading/10 px-1.5 py-0.5 text-[11px] font-medium text-reading hover:underline">
-                  p. {p}
-                </Link>
-              ))}
-            </span>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export function TagChips({ tags }: { tags: string[] }) {
-  if (tags.length === 0) return null;
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {tags.map((t) => (
-        <Link
-          key={t}
-          to={`/search?tag=${encodeURIComponent(t)}`}
-          className="inline-flex items-center rounded-md bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-accent hover:underline"
-        >
-          <Hash className="size-3" aria-hidden />
-          {t}
-        </Link>
-      ))}
-    </div>
-  );
-}
+export { BacklinkList, TagChips, backlinkLabel } from './backlink-list';
 
 function NoteInfo({ note }: { note: Note }) {
   const back = useQuery({ queryKey: qk.backlinks('note', note.id), queryFn: () => endpoints.notes.backlinks('note', note.id) });
@@ -310,12 +246,14 @@ export function Component() {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const editorRef = useRef<NoteEditorHandle>(null);
-  const wideScreen = useMediaQuery('(min-width: 1280px)');
+  const wideScreen = useWideView(1024);
   const [panelPref, setPanelPref] = useLocalPreference('mynotes:note-panel', true);
   const [panelSheet, setPanelSheet] = useState(false);
   const [dialog, setDialog] = useState<'move' | 'history' | null>(null);
   const [moveTo, setMoveTo] = useState<string | null>(null);
-  const [initial, setInitial] = useState<{ title: string; content: RichTextDoc; restored: boolean } | null>(null);
+  const [initialState, setInitial] = useState<{ id: string; title: string; content: RichTextDoc; restored: boolean } | null>(null);
+  // Only the content decided for this note: right after moving to another note, the previous one's must never reach its editor.
+  const initial = initialState?.id === id ? initialState : null;
   const [conflict, setConflict] = useState<Note | null>(null);
   const saveState = useSaveState(id);
 
@@ -340,10 +278,10 @@ export function Component() {
       if (cancelled) return;
       justCreatedNotes.delete(id);
       if (!draft) {
-        setInitial({ title: note.title, content: note.content, restored: false });
+        setInitial({ id, title: note.title, content: note.content, restored: false });
         return;
       }
-      setInitial({ title: draft.title, content: draft.content, restored: true });
+      setInitial({ id, title: draft.title, content: draft.content, restored: true });
       if (draft.status === 'conflict' && draft.server) {
         setConflict(draft.server);
       } else if (draft.baseVersion < note.version) {
@@ -364,6 +302,18 @@ export function Component() {
     if (saveState !== 'conflict') return;
     void notesSync.getDraft(id).then((d) => d?.server && setConflict(d.server));
   }, [saveState, id]);
+
+  // "/notes/<id>#secao" (a reference to a heading) scrolls to that heading once the text is shown.
+  useEffect(() => {
+    const slug = decodeURIComponent(location.hash.slice(1));
+    if (!slug || !initial) return;
+    const t = setTimeout(() => {
+      const dom = editorRef.current?.editor?.view.dom;
+      const heading = [...(dom?.querySelectorAll('h1, h2, h3') ?? [])].find((h) => headingSlug(h.textContent ?? '') === slug);
+      heading?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [location.hash, initial]);
 
   const getBaseVersion = useCallback(() => qc.getQueryData<Note>(qk.note(id))?.version ?? note?.version ?? 1, [qc, id, note?.version]);
 
@@ -537,7 +487,7 @@ export function Component() {
       </div>
 
       {panelOpen && (
-        <aside className="scrollbar-thin sticky top-0 hidden h-dvh w-80 shrink-0 overflow-y-auto border-l border-border p-5 xl:block" aria-label="Detalhes da nota">
+        <aside className="scrollbar-thin sticky top-0 h-(--view-h) w-80 shrink-0 overflow-y-auto border-l border-border p-5" aria-label="Detalhes da nota">
           {info}
         </aside>
       )}

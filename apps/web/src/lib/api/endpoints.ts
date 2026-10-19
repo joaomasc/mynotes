@@ -1,6 +1,7 @@
 import type {
   ActivityEvent,
   Backlink,
+  BrokenReference,
   BackupManifest,
   BackupTableName,
   Concept,
@@ -108,6 +109,7 @@ export const endpoints = {
       api.get<Reference[]>('/references/suggest', { q, types, limit }, signal),
     /** `refs`: `type:id` pairs. */
     resolve: (refs: string[]) => api.get<Reference[]>('/references/resolve', { refs: refs.join(',') }),
+    broken: () => api.get<BrokenReference[]>('/references/broken'),
   },
 
   layouts: {

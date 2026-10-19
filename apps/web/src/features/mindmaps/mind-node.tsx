@@ -1,9 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Handle, Position, useReactFlow, type Node, type NodeProps } from '@xyflow/react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import type { MindMapNode } from '@mynotes/shared';
 import { cn } from '@/lib/cn';
+import { endpoints } from '@/lib/api/endpoints';
 import { EntityIcon, entityPath } from '@/lib/entities';
+import { qk } from '@/lib/query';
 
 export interface MindNodeData extends Record<string, unknown> {
   label: string;
@@ -15,6 +18,17 @@ export interface MindNodeData extends Record<string, unknown> {
 export type MindFlowNode = Node<MindNodeData, 'mind'>;
 
 const handle = '!size-2.5 !border-2 !border-surface !bg-border-strong opacity-0 group-hover:opacity-100 group-[.selected]:opacity-100 [@media(hover:none)]:opacity-100';
+
+/** Text of a linked note, shown on the node like a canvas card. */
+function NoteCard({ id }: { id: string }) {
+  const note = useQuery({ queryKey: qk.note(id), queryFn: () => endpoints.notes.get(id), staleTime: 60_000 });
+  if (!note.data) return null;
+  return note.data.excerpt ? (
+    <p className="mt-1.5 line-clamp-6 border-t border-border pt-1.5 text-xs leading-relaxed text-muted">{note.data.excerpt}</p>
+  ) : (
+    <p className="mt-1.5 border-t border-border pt-1.5 text-xs text-subtle">Nota vazia</p>
+  );
+}
 
 export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps<MindFlowNode>) {
   const { updateNodeData } = useReactFlow();
@@ -37,7 +51,8 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
   return (
     <div
       className={cn(
-        'group max-w-64 min-w-24 rounded-xl border bg-surface px-3 py-2 text-sm shadow-card transition-shadow',
+        'group min-w-24 rounded-xl border bg-surface px-3 py-2 text-sm shadow-card transition-shadow',
+        data.ref?.type === 'note' ? 'w-72' : 'max-w-64',
         selected ? 'selected border-accent ring-2 ring-accent/30' : 'border-border',
         isRoot && 'px-4 py-3 text-base font-semibold',
       )}
@@ -79,6 +94,7 @@ export const MindNode = memo(function MindNode({ id, data, selected }: NodeProps
           <span className="truncate">{data.ref.title ?? 'Item vinculado'}</span>
         </Link>
       )}
+      {data.ref?.type === 'note' && <NoteCard id={data.ref.id} />}
     </div>
   );
 });

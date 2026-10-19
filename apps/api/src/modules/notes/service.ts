@@ -222,8 +222,10 @@ export async function listNotes(
   }
   if (q.tag) {
     await reindexNotes(db, userId);
-    where += ' AND id IN (SELECT note_id FROM note_tags WHERE tag = ?)';
-    binds.push(normalizeTag(q.tag));
+    // A parent tag also matches its nested tags (#historia → #historia/brasil).
+    const tag = normalizeTag(q.tag);
+    where += " AND id IN (SELECT note_id FROM note_tags WHERE tag = ? OR tag LIKE ? ESCAPE '\\')";
+    binds.push(tag, `${tag.replace(/[\\%_]/g, (c) => `\\${c}`)}/%`);
   }
   const rows = await all(
     db,

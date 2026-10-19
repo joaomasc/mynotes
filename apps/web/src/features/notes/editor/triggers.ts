@@ -30,7 +30,7 @@ const OPEN = `(?:^|[\\s(\\[{"'“‘\\ufffc])`;
 const SLASH = new RegExp(`${OPEN}/((?:[^\\s/\\ufffc][^/\\ufffc\\n]{0,139})?)$`, 'u');
 /** "/pagina.…", "/livro.…": an explicit kind, so even a long title is a search, not prose. */
 const KIND_PREFIX = /^\p{L}+\./u;
-const HASH = new RegExp(`${OPEN}#((?:\\p{L}[\\p{L}\\p{N}_-]{0,49})?)$`, 'u');
+const HASH = new RegExp(`${OPEN}#((?:\\p{L}[\\p{L}\\p{N}_/-]{0,49})?)$`, 'u');
 
 /** Line breaks (Shift+Enter, common in pasted text) read as "\n"; other inline nodes as one placeholder. */
 const leafText = (node: PMNode) => (node.type.name === 'hardBreak' ? '\n' : '￼');

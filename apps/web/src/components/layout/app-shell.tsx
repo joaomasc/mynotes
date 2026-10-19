@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Dialog as RDialog } from 'radix-ui';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   BookOpen,
+  ChevronRight,
   Ellipsis,
   FolderPlus,
   FolderTree,
@@ -14,6 +15,7 @@ import {
   Network,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRight,
   Plus,
   Search,
   Settings,
@@ -29,14 +31,22 @@ import { Kbd } from '@/components/ui/feedback';
 import { Menu, type MenuEntry } from '@/components/ui/menu';
 import { logout, useAuth } from '@/lib/auth/session';
 import { cn } from '@/lib/cn';
-import { isTypingTarget, useLocalPreference } from '@/lib/hooks';
+import { entityPath, EntityIcon } from '@/lib/entities';
+import { effectiveHotkey, formatHotkey, useHotkeyOverrides } from '@/lib/hotkeys';
+import { isTypingTarget, useMediaQuery } from '@/lib/hooks';
+import { getPref, setPref, usePref } from '@/lib/prefs';
 import { notesSync } from '@/lib/sync/notes-sync';
 import { useConfirm } from '@/components/ui/dialog';
+import { CommandsProvider, useCommands, type UiActions } from '@/features/commands/commands';
+import { TemplatePicker } from '@/features/notes/template-picker';
+import { HoverPreviewLayer } from '@/features/preview/hover-preview';
+import { useFavorites } from '@/features/shared/favorite-button';
 import { TopicTree } from '@/features/topics/topic-tree';
 import { TopicFormDialog } from '@/features/topics/topic-dialogs';
 import { useCurrentTopic } from '@/features/topics/use-current-topic';
 import { useCreateNote } from '@/features/notes/use-create-note';
-import { CommandPaletteProvider, useCommandPalette } from './command-palette';
+import { Workspace } from '@/features/workspace/workspace';
+import { CommandPaletteDialog, CommandPaletteProvider, useCommandPalette } from './command-palette';
 import { SyncIndicator } from './sync-indicator';
 
 /**
@@ -56,6 +66,11 @@ const MORE: { to: string; label: string; icon: typeof House }[] = [
   { to: '/maps', label: 'Mapas livres', icon: Network },
   { to: '/trash', label: 'Lixeira', icon: Trash },
 ];
+
+const RightPanel = lazy(() => import('@/features/workspace/right-panel').then((m) => ({ default: m.RightPanel })));
+
+/** Wide screens get the workspace (tabs, split panes, right panel). */
+const WIDE = '(min-width: 1024px)';
 
 /**
  * Items of the "+" menu. Inside a topic (or a note/book that belongs to one)
@@ -148,6 +163,39 @@ function NavItems({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?:
   );
 }
 
+/** Favorites as a sidebar section (Obsidian's bookmarks): links can be dragged to a tab bar. */
+function Bookmarks({ onNavigate }: { onNavigate?: () => void }) {
+  const { data } = useFavorites();
+  const [open, setOpen] = usePref('mynotes:bookmarks-open', true);
+  if (!data?.length) return null;
+  return (
+    <section aria-label="Favoritos" className="mb-2">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-1 px-2 py-1 text-[11px] font-semibold tracking-wide text-subtle uppercase hover:text-muted">
+        <ChevronRight className={cn('size-3 transition-transform', open && 'rotate-90')} aria-hidden />
+        Favoritos
+      </button>
+      {open && (
+        <ul className="space-y-px">
+          {data.map((f) => (
+            <li key={f.id}>
+              <NavLink
+                to={entityPath(f.entityType, f.entityId)}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  cn('flex h-8 items-center gap-2 rounded-lg px-2.5 text-sm', isActive ? 'bg-surface-3 text-text' : 'text-muted hover:bg-surface-2 hover:text-text')
+                }
+              >
+                <EntityIcon type={f.entityType} className="size-3.5 shrink-0" />
+                <span className="truncate">{f.title}</span>
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function UserFooter({ collapsed }: { collapsed?: boolean }) {
   const { user } = useAuth();
   const confirm = useConfirm();
@@ -196,28 +244,30 @@ function Brand({ collapsed }: { collapsed?: boolean }) {
   );
 }
 
-function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+function Sidebar({ collapsed, onToggle, rightOpen, onToggleRight }: { collapsed: boolean; onToggle: () => void; rightOpen: boolean; onToggleRight: () => void }) {
   const palette = useCommandPalette();
   const quick = useQuickCreate();
   return (
     <aside
-      className={cn(
-        'sticky top-0 hidden h-dvh shrink-0 flex-col gap-3 border-r border-border bg-surface-2/40 py-3 lg:flex',
-        collapsed ? 'w-14 px-2' : 'w-64 px-3',
-      )}
+      className={cn('flex h-dvh shrink-0 flex-col gap-3 border-r border-border bg-surface-2/40 py-3', collapsed ? 'w-14 px-2' : 'w-64 px-3')}
       aria-label="Barra lateral"
     >
       <div className={cn('flex items-center justify-between', collapsed && 'flex-col gap-2')}>
         <Brand collapsed={collapsed} />
-        <IconButton label={collapsed ? 'Expandir barra lateral (Ctrl+\\)' : 'Recolher barra lateral (Ctrl+\\)'} size="sm" onClick={onToggle}>
-          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-        </IconButton>
+        <div className={cn('flex', collapsed && 'flex-col')}>
+          <IconButton label={rightOpen ? 'Ocultar painel direito (Ctrl+Shift+\\)' : 'Painel direito: menções, sumário, grafo local (Ctrl+Shift+\\)'} size="sm" active={rightOpen} onClick={onToggleRight}>
+            <PanelRight className="size-4" />
+          </IconButton>
+          <IconButton label={collapsed ? 'Expandir barra lateral (Ctrl+\\)' : 'Recolher barra lateral (Ctrl+\\)'} size="sm" onClick={onToggle}>
+            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </IconButton>
+        </div>
       </div>
       <div className={cn('flex gap-1.5', collapsed && 'flex-col')}>
         <button
           type="button"
-          onClick={palette.open}
-          title="Buscar (Ctrl+K)"
+          onClick={() => palette.open('search')}
+          title="Buscar (Ctrl+K) · Troca rápida (Ctrl+O) · Comandos (Ctrl+P)"
           className={cn(
             'flex h-8 items-center gap-2 rounded-lg border border-border bg-surface text-sm text-subtle hover:border-border-strong',
             collapsed ? 'w-10 justify-center' : 'flex-1 px-2.5',
@@ -246,6 +296,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
       </div>
       <NavItems collapsed={collapsed} />
       <div className={cn('scrollbar-thin -mx-1 min-h-0 flex-1 overflow-y-auto px-1', collapsed && 'hidden')}>
+        <Bookmarks />
         <TopicTree />
       </div>
       {collapsed && <div className="flex-1" />}
@@ -273,6 +324,7 @@ function MobileDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
           </div>
           <NavItems onNavigate={close} />
           <div className="scrollbar-thin -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+            <Bookmarks onNavigate={close} />
             <TopicTree onNavigate={close} />
           </div>
           <div className="safe-bottom">
@@ -295,7 +347,7 @@ function MobileTopBar({ onMenu }: { onMenu: () => void }) {
         <Brand />
       </div>
       <SyncIndicator compact />
-      <IconButton label="Buscar" onClick={palette.open}>
+      <IconButton label="Buscar" onClick={() => palette.open('search')}>
         <Search className="size-5" />
       </IconButton>
     </header>
@@ -347,51 +399,60 @@ function MobileBottomNav({ onMenu }: { onMenu: () => void }) {
   );
 }
 
+/** Every shortcut: the commands' (customizable in Settings) and the fixed ones. */
 function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const rows: [string, ReactNode][] = [
-    ['Buscar / comandos', <Kbd key="k">Ctrl K</Kbd>],
-    ['Nova nota', <Kbd key="n">Alt N</Kbd>],
-    ['Recolher barra lateral', <Kbd key="b">Ctrl \</Kbd>],
+  const commands = useCommands();
+  const [overrides] = useHotkeyOverrides();
+  const groups = new Map<string, [string, ReactNode][]>();
+  for (const c of commands) {
+    const key = effectiveHotkey(c.id, c.hotkey, overrides);
+    if (!key || c.id.startsWith('tab.go') && c.id !== 'tab.go1') continue;
+    const label = c.id === 'tab.go1' ? 'Ir para a aba 1…9' : c.label;
+    const shown = c.id === 'tab.go1' ? `${formatHotkey(key).replace(/1$/, '')}1…9` : formatHotkey(key);
+    groups.set(c.group, [...(groups.get(c.group) ?? []), [label, <Kbd key={c.id}>{shown}</Kbd>]]);
+  }
+  groups.set('Fixos', [
+    ['Ir para Início / Notas / Biblioteca / Grafo', <span key="g"><Kbd>G</Kbd> + <Kbd>H</Kbd> / <Kbd>N</Kbd> / <Kbd>B</Kbd> / <Kbd>G</Kbd></span>],
     ['Salvar nota agora', <Kbd key="s">Ctrl S</Kbd>],
     ['Inserir link (no editor)', <Kbd key="l">Ctrl K</Kbd>],
-    ['Ir para Início / Notas / Biblioteca / Grafo', <span key="g"><Kbd>G</Kbd> + <Kbd>H</Kbd> / <Kbd>N</Kbd> / <Kbd>B</Kbd> / <Kbd>G</Kbd></span>],
     ['Referenciar um item (no editor)', <Kbd key="r">/</Kbd>],
+    ['Referenciar um título de outra nota', <Kbd key="h">/nota.Título#Seção</Kbd>],
     ['Marcar com tag (no editor)', <Kbd key="t">#</Kbd>],
+    ['Pré-visualizar um link (no editor)', <Kbd key="p">Ctrl + passar o mouse</Kbd>],
+    ['Abrir link em nova aba / ao lado', <span key="c"><Kbd>Ctrl clique</Kbd> / <Kbd>Ctrl Alt clique</Kbd></span>],
     ['Mostrar atalhos', <Kbd key="q">?</Kbd>],
-  ];
+  ]);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Atalhos de teclado" size="sm">
-      <dl className="divide-y divide-border text-sm">
-        {rows.map(([label, keys]) => (
-          <div key={label} className="flex items-center justify-between py-2.5">
-            <dt className="text-muted">{label}</dt>
-            <dd>{keys}</dd>
-          </div>
+    <Dialog open={open} onOpenChange={onOpenChange} title="Atalhos de teclado" size="lg">
+      <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+        {[...groups].map(([group, rows]) => (
+          <section key={group}>
+            <h3 className="mb-1 text-xs font-semibold tracking-wide text-subtle uppercase">{group}</h3>
+            <dl className="divide-y divide-border text-sm">
+              {rows.map(([label, keys]) => (
+                <div key={label} className="flex items-center justify-between gap-3 py-2">
+                  <dt className="text-muted">{label}</dt>
+                  <dd className="shrink-0">{keys}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
         ))}
-      </dl>
-      <p className="mt-3 text-xs text-subtle">No macOS, use ⌘ no lugar de Ctrl.</p>
+      </div>
+      <p className="mt-3 text-xs text-subtle">
+        No macOS, use ⌘ no lugar de Ctrl. Personalize em Configurações › Atalhos.
+      </p>
     </Dialog>
   );
 }
 
-function GlobalShortcuts({ onToggleSidebar, onHelp }: { onToggleSidebar: () => void; onHelp: () => void }) {
+/** Fixed shortcuts that aren't commands: "G then H/N/B/G" and "?". */
+function SequenceShortcuts({ onHelp }: { onHelp: () => void }) {
   const navigate = useNavigate();
-  const createNote = useCreateNote();
-  const topicId = useCurrentTopic()?.id ?? null;
   useEffect(() => {
     let lastG = 0;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
-        e.preventDefault();
-        onToggleSidebar();
-        return;
-      }
-      if (e.altKey && !e.ctrlKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        createNote.mutate(topicId);
-        return;
-      }
-      if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.defaultPrevented || isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === '?') {
         onHelp();
       } else if (Date.now() - lastG < 1000) {
@@ -404,35 +465,88 @@ function GlobalShortcuts({ onToggleSidebar, onHelp }: { onToggleSidebar: () => v
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [navigate, createNote, topicId, onToggleSidebar, onHelp]);
+  }, [navigate, onHelp]);
   return null;
 }
 
-export function AppShell() {
-  const [collapsed, setCollapsed] = useLocalPreference('mynotes:sidebar-collapsed', false);
+interface RightState {
+  open: boolean;
+  tab: string;
+}
+const RIGHT_KEY = 'mynotes:right-panel';
+const SIDEBAR_KEY = 'mynotes:sidebar-collapsed';
+
+function Shell() {
+  const wide = useMediaQuery(WIDE);
+  const palette = useCommandPalette();
+  const [collapsed, setCollapsed] = usePref(SIDEBAR_KEY, false);
+  const [right, setRight] = usePref<RightState>(RIGHT_KEY, { open: false, tab: 'backlinks' });
   const [drawer, setDrawer] = useState(false);
   const [help, setHelp] = useState(false);
+  const [newTopic, setNewTopic] = useState(false);
   const location = useLocation();
   useEffect(() => setDrawer(false), [location.pathname]);
 
+  const ui = useMemo<UiActions>(
+    () => ({
+      toggleSidebar: () => setPref(SIDEBAR_KEY, !getPref(SIDEBAR_KEY, false)),
+      toggleRightPanel: (tab?: string) => {
+        const cur = getPref<RightState>(RIGHT_KEY, { open: false, tab: 'backlinks' });
+        // Asking for another tab opens it; asking for the open one (or none) toggles the panel.
+        setPref(RIGHT_KEY, tab && (tab !== cur.tab || !cur.open) ? { open: true, tab } : { ...cur, open: !cur.open });
+      },
+      openHelp: () => setHelp(true),
+      openPalette: palette.open,
+      newTopic: () => setNewTopic(true),
+    }),
+    [palette.open],
+  );
+
   return (
-    <CommandPaletteProvider>
+    <CommandsProvider ui={ui}>
       <a href="#main" className="sr-only z-50 rounded bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Pular para o conteúdo
       </a>
-      <div className="flex min-h-dvh">
-        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <MobileTopBar onMenu={() => setDrawer(true)} />
-          <main id="main" className="min-w-0 flex-1 pb-[calc(4rem+env(safe-area-inset-bottom))] lg:pb-0">
-            <Outlet />
+      {wide ? (
+        <div className="flex h-dvh overflow-hidden">
+          <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} rightOpen={right.open} onToggleRight={() => ui.toggleRightPanel()} />
+          <main id="main" className="flex min-w-0 flex-1">
+            <Workspace />
           </main>
+          {right.open && (
+            <Suspense fallback={<aside className="w-80 shrink-0 border-l border-border" />}>
+              <RightPanel tab={right.tab} onTab={(tab) => setRight({ open: true, tab })} onClose={() => setRight({ ...right, open: false })} />
+            </Suspense>
+          )}
         </div>
-      </div>
-      <MobileDrawer open={drawer} onOpenChange={setDrawer} />
-      <MobileBottomNav onMenu={() => setDrawer(true)} />
+      ) : (
+        <>
+          <div className="flex min-h-dvh">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <MobileTopBar onMenu={() => setDrawer(true)} />
+              <main id="main" className="min-w-0 flex-1 pb-[calc(4rem+env(safe-area-inset-bottom))]">
+                <Outlet />
+              </main>
+            </div>
+          </div>
+          <MobileDrawer open={drawer} onOpenChange={setDrawer} />
+          <MobileBottomNav onMenu={() => setDrawer(true)} />
+        </>
+      )}
       <ShortcutsDialog open={help} onOpenChange={setHelp} />
-      <GlobalShortcuts onToggleSidebar={() => setCollapsed(!collapsed)} onHelp={() => setHelp(true)} />
+      <SequenceShortcuts onHelp={() => setHelp(true)} />
+      <CommandPaletteDialog />
+      <HoverPreviewLayer />
+      <TemplatePicker />
+      <TopicFormDialog open={newTopic} onOpenChange={setNewTopic} parentId={null} />
+    </CommandsProvider>
+  );
+}
+
+export function AppShell() {
+  return (
+    <CommandPaletteProvider>
+      <Shell />
     </CommandPaletteProvider>
   );
 }

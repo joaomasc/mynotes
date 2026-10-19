@@ -19,7 +19,10 @@ import {
 import '@xyflow/react/dist/style.css';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
-import { ArrowLeft, Check, Download, Ellipsis, GitBranch, Link2, Palette, Pencil, Plus, RefreshCw, Trash, TriangleAlert, Unlink, Wand } from 'lucide-react';
+import { ArrowLeft, Check, Download, Ellipsis, GitBranch, Link2, Palette, Pencil, Plus, RefreshCw, StickyNote, Trash, TriangleAlert, Unlink, Wand } from 'lucide-react';
+import { stripBase } from '@/app/routes';
+import { loadReference } from '@/lib/references';
+import { pathTarget } from '../workspace/tab-info';
 import type { GraphEntityType, MindMap, SearchResult } from '@mynotes/shared';
 import { Button, IconButton } from '@/components/ui/button';
 import { Dialog, useConfirm } from '@/components/ui/dialog';
@@ -53,7 +56,7 @@ function Editor({ map }: { map: MindMap }) {
   const statusRef = useRef<Status>('saved');
   statusRef.current = status;
   const [title, setTitle] = useState(map.title);
-  const [dialog, setDialog] = useState<'link' | 'rename' | null>(null);
+  const [dialog, setDialog] = useState<'link' | 'rename' | 'card' | null>(null);
   const version = useRef(map.version);
   const dirty = useRef(false);
   const viewport = useRef<Viewport | null>(map.data.viewport);
@@ -145,6 +148,39 @@ function Editor({ map }: { map: MindMap }) {
     touch();
   };
 
+  /** A node linked to an item (a note shows its text, like a canvas card). */
+  const addLinkedNode = (ref: { type: GraphEntityType; id: string; title: string }, position?: { x: number; y: number }) => {
+    const id = `n-${shortId()}`;
+    const at = position ?? flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    const node: MindFlowNode = { id, type: 'mind', position: at, selected: true, data: { label: ref.title || 'Sem título', color: null, ref, parentId: null } };
+    setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), node]);
+    touch();
+  };
+
+  // Links dragged from the sidebar, a list or another tab become linked nodes where they are dropped.
+  const onDrop = async (e: React.DragEvent) => {
+    const uri = e.dataTransfer.getData('text/uri-list').split('\n')[0]?.trim();
+    if (!uri) return;
+    let path: string;
+    try {
+      const url = new URL(uri, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      path = stripBase(url.pathname) + url.search;
+    } catch {
+      return;
+    }
+    const target = pathTarget(path).entity;
+    if (!target || !['topic', 'note', 'reading', 'document', 'concept'].includes(target.type)) return;
+    e.preventDefault();
+    const position = flow.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    try {
+      const ref = await loadReference(target.type as GraphEntityType, target.id);
+      addLinkedNode({ type: ref.type, id: ref.id, title: ref.title }, position);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  };
+
   const updateSelected = (patch: Partial<MindFlowNode['data']>) => {
     setNodes((ns) => ns.map((n) => (n.selected ? { ...n, data: { ...n.data, ...patch } } : n)));
     touch();
@@ -229,7 +265,7 @@ function Editor({ map }: { map: MindMap }) {
   }[status];
 
   return (
-    <div className="flex h-[calc(100dvh-3.25rem-4rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col lg:h-dvh" onKeyDown={onKeyDown}>
+    <div className="flex h-[calc(100dvh-3.25rem-4rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col lg:h-(--view-h)" onKeyDown={onKeyDown}>
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface px-3 py-2">
         <Link to="/maps" aria-label="Voltar aos mapas" className="rounded-lg p-1.5 text-muted hover:bg-surface-2">
           <ArrowLeft className="size-4" />
@@ -245,6 +281,9 @@ function Editor({ map }: { map: MindMap }) {
           <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => addNode(one)} title="Adicionar (Tab: filho, Enter: irmão)">
             <span className="hidden sm:inline">{one ? 'Filho' : 'Nó'}</span>
           </Button>
+          <IconButton label="Adicionar nota como cartão (ou arraste um link para o mapa)" size="sm" onClick={() => setDialog('card')}>
+            <StickyNote className="size-4" />
+          </IconButton>
           <IconButton label="Editar texto (F2)" size="sm" disabled={!one} onClick={() => one && setNodes((ns) => ns.map((n) => (n.id === one.id ? { ...n, data: { ...n.data, editing: true } } : n)))}>
             <Pencil className="size-4" />
           </IconButton>
@@ -293,7 +332,16 @@ function Editor({ map }: { map: MindMap }) {
           </Button>
         </div>
       )}
-      <div className="relative min-h-0 flex-1">
+      <div
+        className="relative min-h-0 flex-1"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('text/uri-list')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'link';
+          }
+        }}
+        onDrop={(e) => void onDrop(e)}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -321,7 +369,7 @@ function Editor({ map }: { map: MindMap }) {
           </div>
         )}
         <p className="pointer-events-none absolute right-3 bottom-3 hidden text-[11px] text-subtle lg:block">
-          Duplo clique edita · Tab cria filho · Enter cria irmão · arraste das bordas para conectar
+          Duplo clique edita · Tab cria filho · Enter cria irmão · arraste das bordas para conectar · solte links aqui
         </p>
       </div>
 
@@ -330,6 +378,15 @@ function Editor({ map }: { map: MindMap }) {
           types={['topic', 'note', 'document', 'reading', 'concept']}
           onPick={(item: SearchResult) => {
             updateSelected({ ref: { type: item.type as GraphEntityType, id: item.id, title: item.title } });
+            setDialog(null);
+          }}
+        />
+      </Dialog>
+      <Dialog open={dialog === 'card'} onOpenChange={(o) => !o && setDialog(null)} title="Adicionar cartão" description="Notas aparecem com o seu texto; outros itens, como um nó vinculado.">
+        <EntityPicker
+          types={['note', 'topic', 'reading', 'document', 'concept']}
+          onPick={(item: SearchResult) => {
+            addLinkedNode({ type: item.type as GraphEntityType, id: item.id, title: item.title });
             setDialog(null);
           }}
         />

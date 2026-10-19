@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Editor } from '@tiptap/react';
 import { toast } from 'sonner';
-import { FolderPlus, Hash, StickyNote, TextCursorInput } from 'lucide-react';
-import { internalHref, normalizeSearch, normalizeTag, uuidv7, type InternalLinkType, type Reference } from '@mynotes/shared';
+import { FolderPlus, Hash, Heading, StickyNote, TextCursorInput } from 'lucide-react';
+import { internalHref, normalizeSearch, normalizeTag, uuidv7, type InternalLinkType, type Reference, type RichTextNode } from '@mynotes/shared';
 import { Spinner } from '@/components/ui/feedback';
 import { errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
@@ -24,10 +24,34 @@ type Item =
   | { kind: 'create-topic'; title: string }
   | { kind: 'create-note'; title: string }
   | { kind: 'keep' }
+  /** A heading of a note: `/nota.Título#Seção`. */
+  | { kind: 'heading'; ref: Reference; heading: string }
   | { kind: 'tag'; tag: string; count: number | null };
 
+/** Text of the headings (levels 1–3) of a note's content. */
+function headingsOf(doc: RichTextNode | undefined): string[] {
+  const out: string[] = [];
+  const text = (n: RichTextNode): string => (n.text ?? '') + (n.content ?? []).map(text).join('');
+  const visit = (n: RichTextNode) => {
+    if (n.type === 'heading') {
+      const t = text(n).trim();
+      if (t) out.push(t);
+      return;
+    }
+    (n.content ?? []).forEach(visit);
+  };
+  if (doc) visit(doc);
+  return out;
+}
+
 /** Inserts a reference node (plus a space) in place of the "/query". */
-export function insertReference(editor: Editor, range: { from: number; to: number }, ref: Pick<Reference, 'type' | 'id' | 'title' | 'role' | 'readingTitle' | 'page'>, page: number | null) {
+export function insertReference(
+  editor: Editor,
+  range: { from: number; to: number },
+  ref: Pick<Reference, 'type' | 'id' | 'title' | 'role' | 'readingTitle' | 'page'>,
+  page: number | null,
+  heading: string | null = null,
+) {
   const label =
     ref.type === 'note' && ref.role === 'annotation'
       ? `${ref.readingTitle ?? 'Livro'}${ref.page ? `, p. ${ref.page}` : ''}`
@@ -36,7 +60,7 @@ export function insertReference(editor: Editor, range: { from: number; to: numbe
     .chain()
     .focus()
     .insertContentAt(range, [
-      { type: 'reference', attrs: { href: internalHref(ref.type as InternalLinkType, ref.id, ref.type === 'reading' ? page : null), label } },
+      { type: 'reference', attrs: { href: internalHref(ref.type as InternalLinkType, ref.id, ref.type === 'reading' ? page : null), label, heading } },
       { type: 'text', text: ' ' },
     ])
     .run();
@@ -73,9 +97,18 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
   const query = useDebounced(trigger?.query ?? '', 120);
   const parsed = useMemo(() => parseRefQuery(query), [query]);
   const slash = trigger?.char === '/';
+  // "/nota.Título#Seção" (or "/Título#Seção"): a heading of a note.
+  const headingQuery = useMemo(() => {
+    if (parsed.kind && parsed.kind.prefix !== 'nota') return null;
+    const m = /^(.+?)#([^#]*)$/.exec(parsed.text);
+    if (!m || /^\s*p?-?\d/.test(m[2]!)) return null;
+    return { title: m[1]!.trim(), heading: m[2]!.trim() };
+  }, [parsed]);
+  const searchText = headingQuery?.title ?? parsed.text;
+  const searchTypes = headingQuery ? 'note' : parsed.kind?.types;
   const refs = useQuery({
-    queryKey: ['reference-suggest', parsed.kind?.types ?? '', parsed.text],
-    queryFn: ({ signal }) => endpoints.references.suggest(parsed.text, parsed.kind?.types, 10, signal),
+    queryKey: ['reference-suggest', searchTypes ?? '', searchText],
+    queryFn: ({ signal }) => endpoints.references.suggest(searchText, searchTypes, 10, signal),
     enabled: slash,
     staleTime: 10_000,
     placeholderData: (prev) => prev,
@@ -88,8 +121,24 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
     placeholderData: (prev) => prev,
   });
 
+  const headingNotes = (headingQuery ? (refs.data ?? []).filter((r) => r.type === 'note' && r.id !== noteId) : []).slice(0, 3);
+  const noteContents = useQueries({
+    queries: headingNotes.map((r) => ({ queryKey: qk.note(r.id), queryFn: () => endpoints.notes.get(r.id), staleTime: 30_000 })),
+  });
+  const headingItems: Item[] = useMemo(() => {
+    if (!headingQuery) return [];
+    const wanted = normalizeSearch(headingQuery.heading);
+    return headingNotes.flatMap((ref, i) =>
+      headingsOf(noteContents[i]?.data?.content)
+        .filter((h) => !wanted || normalizeSearch(h).includes(wanted))
+        .map((heading): Item => ({ kind: 'heading', ref, heading })),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recomputed when the loaded contents change
+  }, [headingQuery, refs.data, noteContents.map((q) => q.dataUpdatedAt).join()]);
+
   const items: Item[] = useMemo(() => {
     if (!trigger) return [];
+    if (headingQuery) return headingItems;
     if (trigger.char === '#') {
       const list: Item[] = (tags.data ?? []).map((t) => ({ kind: 'tag', tag: t.tag, count: t.count }));
       const typed = normalizeTag(query);
@@ -116,7 +165,7 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
       if (!exact && (!parsed.kind || parsed.kind.types === 'note')) out.push({ kind: 'create-note', title: text });
     }
     return out;
-  }, [trigger, tags.data, refs.data, parsed, query, noteId]);
+  }, [trigger, tags.data, refs.data, parsed, query, noteId, headingQuery, headingItems]);
 
   const close = () => trigger && dismissTrigger(editor.view, trigger.from);
 
@@ -126,6 +175,9 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
     switch (item.kind) {
       case 'ref':
         insertReference(editor, range, item.ref, parsed.page);
+        return;
+      case 'heading':
+        insertReference(editor, range, item.ref, null, item.heading);
         return;
       case 'type':
         editor.chain().focus().insertContentAt(range, `/${item.def.prefix}.`).run();
@@ -250,6 +302,11 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
                 : null;
         break;
       }
+      case 'heading':
+        icon = <Heading className="size-4 text-note" />;
+        title = `${refSyntax(item.ref)}#${item.heading}`;
+        detail = 'Título dentro da nota';
+        break;
       case 'pick-page':
         icon = <EntityIcon type="reading" />;
         title = `/pagina.${item.ref.title}`;
@@ -286,7 +343,7 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
     }
     return (
       <li
-        key={item.kind === 'ref' || item.kind === 'pick-page' ? `${item.kind}:${item.ref.type}:${item.ref.id}` : item.kind === 'type' ? item.def.prefix : item.kind === 'tag' ? `t:${item.tag}` : item.kind}
+        key={item.kind === 'heading' ? `h:${item.ref.id}:${item.heading}:${i}` : item.kind === 'ref' || item.kind === 'pick-page' ? `${item.kind}:${item.ref.type}:${item.ref.id}` : item.kind === 'type' ? item.def.prefix : item.kind === 'tag' ? `t:${item.tag}` : item.kind}
         id={`refmenu-${i}`}
         data-index={i}
         role="option"
@@ -317,7 +374,15 @@ export function ReferenceMenu({ editor, noteId, topicId }: { editor: Editor; not
         {items.map(row)}
         {items.length === 0 && (
           <li className="px-2.5 py-3 text-center text-sm text-muted">
-            {loading ? <Spinner className="mx-auto size-4" /> : slash ? 'Digite para buscar assuntos, notas, livros…' : 'Digite o nome da tag'}
+            {loading ? (
+              <Spinner className="mx-auto size-4" />
+            ) : headingQuery ? (
+              noteContents.some((q) => q.isLoading) ? <Spinner className="mx-auto size-4" /> : 'Nenhum título com esse nome nas notas encontradas'
+            ) : slash ? (
+              'Digite para buscar assuntos, notas, livros… (Título#seção cita um título)'
+            ) : (
+              'Digite o nome da tag'
+            )}
           </li>
         )}
       </ul>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { Monitor, Moon, Sun, Trash } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Segmented } from '@/components/ui/form';
@@ -9,6 +9,8 @@ import { API_BASE, APP_VERSION } from '@/lib/config';
 import { readThemePreference, type ThemePreference } from '@/theme-boot';
 import { PasswordForm, SessionsList } from './account-section';
 import { BackupSection } from './backup-section';
+import { HotkeysSection } from './hotkeys-section';
+import { NotesSection } from './notes-section';
 import { setLocalTheme, useSetting, useUpdateSetting } from './use-settings';
 
 function Block({ id, title, description, children }: { id: string; title: string; description?: ReactNode; children: ReactNode }) {
@@ -72,12 +74,21 @@ function StudyGoal() {
 
 export function Component() {
   const { user } = useAuth();
+  const { hash } = useLocation();
+  // Links like /settings#atalhos open at that section.
+  useEffect(() => {
+    if (!hash) return;
+    const t = setTimeout(() => document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150);
+    return () => clearTimeout(t);
+  }, [hash]);
   return (
     <Page width="narrow">
       <PageHeader title="Configurações" />
       <nav aria-label="Seções" className="-mx-1 mb-6 flex gap-1 overflow-x-auto text-sm">
         {[
           ['aparencia', 'Aparência'],
+          ['notas', 'Notas'],
+          ['atalhos', 'Atalhos'],
           ['estudos', 'Estudos'],
           ['conta', 'Conta e segurança'],
           ['backup', 'Backup'],
@@ -91,6 +102,12 @@ export function Component() {
       <div className="space-y-6">
         <Block id="aparencia" title="Aparência" description="O tema escolhido vale para todos os seus dispositivos.">
           <Appearance />
+        </Block>
+        <Block id="notas" title="Notas" description="Nota diária e modelos valem para todos os seus dispositivos; largura e modo de abertura, só para este.">
+          <NotesSection />
+        </Block>
+        <Block id="atalhos" title="Atalhos de teclado" description="Clique no teclado de um comando e pressione a nova combinação. A paleta de comandos (Ctrl+P) mostra todos.">
+          <HotkeysSection />
         </Block>
         <Block
           id="estudos"

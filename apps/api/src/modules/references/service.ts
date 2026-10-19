@@ -3,6 +3,7 @@ import {
   VIEW_KEY_PATTERN,
   searchTerms,
   zViewLayoutData,
+  type BrokenReference,
   type GraphEntityType,
   type NoteRole,
   type Reference,
@@ -11,7 +12,7 @@ import {
   type ViewLayoutData,
 } from '@mynotes/shared';
 import { ApiError, badRequest, notFound, tooLarge } from '../../lib/errors';
-import { first, num, numOrNull, parseJson, str, strOrNull, stmt, type Bindable, type Row } from '../../lib/db';
+import { all, first, num, numOrNull, parseJson, str, strOrNull, stmt, type Bindable, type Row } from '../../lib/db';
 import { NOTE_SUMMARY_COLS, reindexNotes, toBacklink, toNoteSummary } from '../notes/service';
 import { toReading } from '../readings/service';
 import { nowIso } from '../../lib/time';
@@ -233,6 +234,35 @@ export async function resolve(db: D1Database, userId: string, refsParam: string)
         materialType: null,
       },
   );
+}
+
+/** Live notes whose written references point to items that no longer exist (or are in the trash). */
+export async function brokenReferences(db: D1Database, userId: string): Promise<BrokenReference[]> {
+  const missing = (table: string, trashable: boolean) =>
+    `NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.id = l.target_id AND t.user_id = n.user_id${trashable ? ' AND t.deleted_at IS NULL' : ''})`;
+  const rows = await all(
+    db,
+    `SELECT l.note_id, n.title, n.topic_id, n.role, n.reading_id, n.page, l.target_type, l.target_id
+       FROM note_links l JOIN notes n ON n.id = l.note_id
+      WHERE n.user_id = ? AND n.deleted_at IS NULL AND (
+            (l.target_type = 'note' AND ${missing('notes', true)})
+         OR (l.target_type = 'topic' AND ${missing('topics', true)})
+         OR (l.target_type = 'document' AND ${missing('documents', true)})
+         OR (l.target_type = 'reading' AND ${missing('readings', false)})
+         OR (l.target_type = 'concept' AND ${missing('concepts', false)}))
+      ORDER BY n.updated_at DESC LIMIT 500`,
+    userId,
+  );
+  return rows.map((r) => ({
+    noteId: str(r.note_id),
+    noteTitle: str(r.title),
+    topicId: strOrNull(r.topic_id),
+    role: (strOrNull(r.role) ?? 'note') as NoteRole,
+    readingId: strOrNull(r.reading_id),
+    page: numOrNull(r.page),
+    targetType: str(r.target_type) as GraphEntityType,
+    targetId: str(r.target_id),
+  }));
 }
 
 /* ------------------------------------------------------- topic context */

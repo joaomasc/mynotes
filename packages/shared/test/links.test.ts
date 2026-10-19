@@ -41,6 +41,10 @@ describe('tags', () => {
     expect(extractTags('#Revisar isto, (#dúvida) e C# ou #1 ou a/#b; #revisar de novo')).toEqual(['revisar', 'duvida']);
   });
 
+  it('can be nested with "/"', () => {
+    expect(extractTags('#História/Brasil e #a/ e #x/1')).toEqual(['historia/brasil', 'a', 'x']);
+  });
+
   it('ignore code', () => {
     const doc = {
       type: 'doc',
