@@ -923,7 +923,7 @@ export async function recordAction(
 }
 
 function eventMessage(id: string, conversationId: string, content: string, createdAt: string): AiMessage {
-  return { id, conversationId, role: 'event', content, sources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt };
+  return { id, conversationId, role: 'event', content, sources: [], webSources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt };
 }
 
 /** Records the decision in the conversation, so the model knows about it in the next turns. */

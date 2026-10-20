@@ -5,7 +5,7 @@ import { aiConfig, costOf, requireReady } from '../src/modules/assistant/config'
 
 import { hasWriteIntent } from '../src/modules/assistant/prompt';
 import { api, client, setupOwner } from './helpers';
-import { answer, callTools, FAKE_KEY, mockOpenAI, restoreFetch, toolOutputs } from './openai-mock';
+import { answer, callTools, FAKE_KEY, mockOpenAI, parseSse, restoreFetch, searchThenCall, toolOutputs, webAnswer } from './openai-mock';
 import { installSemanticFakes } from './semantic-fakes';
 
 /*
@@ -112,6 +112,11 @@ describe('assistant building blocks', () => {
     expect(cfg.dailyBudgetUsd).toBe(0.5);
     // 1000 uncached input, 200 cached, 80 output at 0.10 / 0.01 / 0.50 per 1M tokens.
     expect(costOf({ inputTokens: 1200, cachedTokens: 200, outputTokens: 80, reasoningTokens: 20 }, cfg.prices)).toBeCloseTo(0.000142, 9);
+    // Web searches are billed per call, on top of tokens; a missing price falls back to OpenAI's, never to free.
+    expect(cfg.webSearch).toEqual({ enabled: true, maxPerTurn: 5, pricePerCall: 0.01 });
+    expect(cfgOf({ AI_PRICE_WEB_SEARCH_PER_CALL: 'abc', AI_MAX_WEB_SEARCHES: '50' }).webSearch).toEqual({ enabled: true, maxPerTurn: 10, pricePerCall: 0.01 });
+    expect(cfgOf({ AI_WEB_SEARCH: 'false' }).webSearch.enabled).toBe(false);
+    expect(costOf({ inputTokens: 1200, cachedTokens: 200, outputTokens: 80, reasoningTokens: 20 }, cfg.prices, 2, 0.01)).toBeCloseTo(0.020142, 9);
   });
 });
 
@@ -659,5 +664,113 @@ describe('assistant: changes to MyNotes', () => {
     expect(JSON.stringify(confirmed.body)).not.toContain('simulated outage');
     batchSpy.mockRestore();
     expect((await http.get('/topics')).body.data).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------ web search -- */
+
+describe('assistant: web search', () => {
+  const withVar = async (name: string, value: string, fn: () => Promise<void>) => {
+    const original = (env as any)[name];
+    (env as any)[name] = value;
+    try {
+      await fn();
+    } finally {
+      (env as any)[name] = original;
+    }
+  };
+  const webTool = (body: any) => body.tools.find((t: any) => t.type === 'web_search');
+
+  it('is offered to the model only in messages where the user turned it on', async () => {
+    const { bodies } = mockOpenAI([answer('Oi!'), answer('ok')]);
+    await send('Oi');
+    expect(webTool(bodies[0])).toBeUndefined();
+    expect(bodies[0].max_tool_calls).toBeUndefined();
+    expect(bodies[0].input.some((i: any) => i.role === 'developer' && /Web search is ON/.test(i.content))).toBe(false);
+
+    await send('O que há de novo sobre isso?', { webSearch: true });
+    expect(webTool(bodies[1])).toMatchObject({ type: 'web_search', user_location: { country: 'BR' } });
+    expect(bodies[1].max_tool_calls).toBe(5);
+    expect(bodies[1].input.some((i: any) => i.role === 'developer' && /Web search is ON/.test(i.content))).toBe(true);
+
+    const status = await http.get('/ai/status');
+    expect(status.body.data.webSearch).toEqual({ enabled: true, maxPerTurn: 5, pricePerCallUsd: 0.01 });
+  });
+
+  it('cites the pages found, shows each search and charges it in the daily budget', async () => {
+    const wiki = 'https://pt.wikipedia.org/wiki/Industrializa%C3%A7%C3%A3o_do_Brasil';
+    mockOpenAI([
+      webAnswer(`Na web, o [Plano de Metas](${wiki}) acelerou a indústria.`, ['industrialização brasileira', 'plano de metas'], [
+        { url: wiki, title: 'Industrialização do Brasil' },
+        { url: wiki, title: 'repetida' },
+        { url: 'javascript:alert(1)', title: 'inválida' },
+      ]),
+    ]);
+    const res = await send('Pesquise sobre a industrialização brasileira', { webSearch: true });
+    expect(res.status).toBe(200);
+    const msg = res.body.data.assistantMessage;
+    expect(msg.content).toContain(`(${wiki})`);
+    expect(msg.webSources).toEqual([{ url: wiki, title: 'Industrialização do Brasil' }]);
+    expect(msg.tools.filter((t: any) => t.tool === 'web_search').map((t: any) => t.label)).toEqual([
+      'Pesquisou na web “industrialização brasileira”',
+      'Pesquisou na web “plano de metas”',
+    ]);
+    // Tokens (0.000142) + 2 searches at US$ 0.01.
+    expect(msg.usage.costUsd).toBeCloseTo(0.020142, 9);
+    const day = new Date().toISOString().slice(0, 10);
+    const row = await env.DB.prepare('SELECT cost_usd FROM ai_usage_daily WHERE user_id = ? AND day = ?').bind(userId, day).first<any>();
+    expect(row.cost_usd).toBeCloseTo(0.020142, 9);
+    // Kept with the conversation.
+    const conv = await http.get(`/ai/conversations/${res.body.data.conversation.id}`);
+    expect(conv.body.data.messages[1].webSources).toEqual([{ url: wiki, title: 'Industrialização do Brasil' }]);
+  });
+
+  it('never writes on its own in a turn that read web pages', async () => {
+    const { bodies } = mockOpenAI([
+      searchThenCall(['resumo plano de metas'], [
+        'create_note',
+        { title: 'Plano de Metas', content_markdown: 'Resumo.', topic_id: null, tags: [], references: [], book: null, mode: 'execute' },
+      ]),
+      answer('Deixei a nota para você confirmar.'),
+    ]);
+    const res = await send('Pesquise na web e crie uma nota com um resumo do Plano de Metas', { webSearch: true });
+    const [out] = toolOutputs(bodies[1]);
+    expect(out).toMatchObject({ status: 'awaiting_confirmation', reason: expect.stringMatching(/não pede uma alteração/) });
+    expect(res.body.data.actions[0].status).toBe('proposed');
+    expect((await http.get('/notes')).body.data).toHaveLength(0);
+    // The search items went back to the model unchanged.
+    expect(bodies[1].input.some((i: any) => i.type === 'web_search_call')).toBe(true);
+  });
+
+  it('stops offering searches once the limit of the message is spent', async () => {
+    await withVar('AI_MAX_WEB_SEARCHES', '2', async () => {
+      const { bodies } = mockOpenAI([searchThenCall(['a', 'b'], ['list_tags', { query: null }]), answer('Pronto.')]);
+      const res = await send('Pesquise isso a fundo', { webSearch: true });
+      expect(res.status).toBe(200);
+      expect(bodies[0].max_tool_calls).toBe(2);
+      expect(webTool(bodies[1])).toBeUndefined();
+      expect(bodies[1].max_tool_calls).toBeUndefined();
+      expect(res.body.data.assistantMessage.usage.costUsd).toBeCloseTo(0.02 + 2 * 0.000142, 9);
+    });
+  });
+
+  it('streams a status while searching', async () => {
+    mockOpenAI([webAnswer('Achei.', ['x'], [{ url: 'https://example.com/a', title: 'A' }])]);
+    const res = await api('POST', '/ai/chat/stream', { token, body: { messageId: uuidv7(), message: 'Pesquise x', webSearch: true } });
+    const events = parseSse(await res.text());
+    expect(events.some((e) => e.event === 'status' && e.data.label === 'Pesquisando na web…')).toBe(true);
+    expect(events.some((e) => e.event === 'tool' && e.data.tool === 'web_search')).toBe(true);
+    expect(events.at(-1)!.data.assistantMessage.webSources).toEqual([{ url: 'https://example.com/a', title: 'A' }]);
+  });
+
+  it('is refused when turned off on the server', async () => {
+    await withVar('AI_WEB_SEARCH', 'false', async () => {
+      const { spy } = mockOpenAI([]);
+      const res = await send('Pesquise x', { webSearch: true });
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/AI_WEB_SEARCH/);
+      expect(spy).not.toHaveBeenCalled();
+      expect((await http.get('/ai/status')).body.data.webSearch.enabled).toBe(false);
+    });
   });
 });

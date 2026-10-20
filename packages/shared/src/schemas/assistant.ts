@@ -30,6 +30,8 @@ export const zAiChatRequest = z.object({
   messageId: zId,
   message: z.string().trim().min(1, 'Escreva uma mensagem').max(AI_MESSAGE_MAX, `Use no máximo ${AI_MESSAGE_MAX} caracteres`),
   context: zAiContext.nullable().default(null),
+  /** Lets the model search the web in this turn (opt-in per message: it costs more and leaves MyNotes). */
+  webSearch: z.boolean().default(false),
 });
 export type AiChatRequest = z.input<typeof zAiChatRequest>;
 
@@ -43,6 +45,13 @@ export const zAiSource = z.object({
   page: z.number().int().nullable(),
 });
 export type AiSource = z.infer<typeof zAiSource>;
+
+/** A web page cited by an answer (from the search tool's citations, never from page content). */
+export const zAiWebSource = z.object({
+  url: z.string(),
+  title: z.string(),
+});
+export type AiWebSource = z.infer<typeof zAiWebSource>;
 
 /**
  * read: searches and lookups (run directly); write: reversible creations and
@@ -114,6 +123,8 @@ export const zAiMessage = z.object({
   role: z.enum(['user', 'assistant', 'event']),
   content: z.string(),
   sources: z.array(zAiSource),
+  /** Web pages cited when the turn searched the web. */
+  webSources: z.array(zAiWebSource),
   tools: z.array(zAiToolActivity),
   actionIds: z.array(zId),
   /** incomplete: the answer was cut (limits); error: the turn failed after doing something. */
@@ -214,6 +225,12 @@ export const zAiStatus = z.object({
   pricing: z
     .object({ inputPerMTok: z.number(), cachedInputPerMTok: z.number(), outputPerMTok: z.number() })
     .nullable(),
+  /** Web search (AI_WEB_SEARCH): searches allowed per message and the price charged per search. */
+  webSearch: z.object({
+    enabled: z.boolean(),
+    maxPerTurn: z.number().int(),
+    pricePerCallUsd: z.number(),
+  }),
   /** Last 30 days (UTC), most recent first. */
   usage: z.array(zAiUsageDay),
 });

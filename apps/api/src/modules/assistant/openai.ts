@@ -23,13 +23,27 @@ export interface FunctionCallItem {
   id?: string;
 }
 
+export interface UrlCitation {
+  type: 'url_citation';
+  url: string;
+  title?: string;
+}
+
 export interface MessageItem {
   type: 'message';
   role: 'assistant';
-  content: { type: string; text?: string; refusal?: string }[];
+  content: { type: string; text?: string; refusal?: string; annotations?: ({ type: string } & Partial<UrlCitation>)[] }[];
 }
 
-export type OutputItem = FunctionCallItem | MessageItem | ({ type: string } & Record<string, unknown>);
+/** A search the hosted web_search tool ran (on OpenAI's side, billed per call). */
+export interface WebSearchCallItem {
+  type: 'web_search_call';
+  id: string;
+  status: string;
+  action?: { type?: string; query?: string; queries?: string[]; url?: string };
+}
+
+export type OutputItem = FunctionCallItem | MessageItem | WebSearchCallItem | ({ type: string } & Record<string, unknown>);
 
 export interface ResponsesResult {
   id: string;
@@ -47,11 +61,22 @@ export interface FunctionTool {
   strict: true;
 }
 
+/** OpenAI's hosted web search: it runs on OpenAI's side, not in the Worker. */
+export interface WebSearchTool {
+  type: 'web_search';
+  search_context_size: 'low' | 'medium' | 'high';
+  user_location: { type: 'approximate'; country: string; timezone: string };
+}
+
 export interface ResponsesRequest {
   instructions: string;
   input: InputItem[];
-  tools: FunctionTool[];
+  tools: (FunctionTool | WebSearchTool)[];
   toolChoice: 'auto' | 'none';
+  /** Ceiling of hosted tool calls (web searches) in this response; function calls do not count. */
+  maxHostedToolCalls?: number;
+  /** Overrides the configured timeout (turns with web search take longer). */
+  timeoutMs?: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -125,7 +150,7 @@ export async function createResponse(cfg: AiConfig & { apiKey: string }, req: Re
         method: 'POST',
         headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
         body,
-        signal: AbortSignal.timeout(cfg.timeoutMs),
+        signal: AbortSignal.timeout(req.timeoutMs ?? cfg.timeoutMs),
       });
     } catch (err) {
       const timeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
@@ -156,6 +181,7 @@ function requestBody(cfg: AiConfig, req: ResponsesRequest, stream: boolean): str
     tools: req.tools,
     tool_choice: req.toolChoice,
     parallel_tool_calls: true,
+    ...(req.maxHostedToolCalls !== undefined ? { max_tool_calls: req.maxHostedToolCalls } : {}),
     max_output_tokens: cfg.maxOutputTokens,
     ...(cfg.reasoningEffort ? { reasoning: { effort: cfg.reasoningEffort } } : {}),
     store: false,
@@ -198,6 +224,7 @@ export async function createResponseStream(
   cfg: AiConfig & { apiKey: string },
   req: ResponsesRequest,
   onText: (delta: string) => void,
+  onWebSearch: () => void = () => undefined,
 ): Promise<ResponsesResult> {
   const body = requestBody(cfg, req, true);
   let res: Response | undefined;
@@ -207,7 +234,7 @@ export async function createResponseStream(
         method: 'POST',
         headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
         body,
-        signal: AbortSignal.timeout(cfg.timeoutMs),
+        signal: AbortSignal.timeout(req.timeoutMs ?? cfg.timeoutMs),
       });
     } catch (err) {
       const timeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
@@ -240,6 +267,7 @@ export async function createResponseStream(
       return;
     }
     if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') onText(event.delta);
+    else if (event.type === 'response.web_search_call.searching') onWebSearch();
     else if (event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed') final = event.response ?? null;
     else if (event.type === 'error') throw streamError(event.code ?? event.error?.code ?? '', event.message ?? event.error?.message ?? '');
   };
@@ -269,6 +297,25 @@ export async function createResponseStream(
 
 export function functionCalls(output: OutputItem[]): FunctionCallItem[] {
   return output.filter((item): item is FunctionCallItem => item.type === 'function_call');
+}
+
+export function webSearchCalls(output: OutputItem[]): WebSearchCallItem[] {
+  return output.filter((item): item is WebSearchCallItem => item.type === 'web_search_call');
+}
+
+/** Pages the answer cites, from the API's url_citation annotations (http/https only, each URL once). */
+export function urlCitations(output: OutputItem[]): { url: string; title: string }[] {
+  const found = new Map<string, string>();
+  for (const item of output) {
+    if (item.type !== 'message') continue;
+    for (const part of (item as MessageItem).content ?? []) {
+      for (const a of part.annotations ?? []) {
+        if (a.type !== 'url_citation' || typeof a.url !== 'string' || !/^https?:\/\//i.test(a.url)) continue;
+        if (!found.has(a.url)) found.set(a.url, typeof a.title === 'string' ? a.title : '');
+      }
+    }
+  }
+  return [...found].map(([url, title]) => ({ url, title }));
 }
 
 /** Visible text of the response (refusals included, as text). */

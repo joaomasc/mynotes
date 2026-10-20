@@ -4,6 +4,7 @@
  *
  *   npm run ai:check -w @mynotes/api              # free: validates the key and the model
  *   npm run ai:check -w @mynotes/api -- --ping    # one tiny paid request (fractions of a cent)
+ *   npm run ai:check -w @mynotes/api -- --web     # one real web search (~US$ 0.01)
  *   npm run ai:check -w @mynotes/api -- --model gpt-5-nano
  *
  * Reads OPENAI_API_KEY from apps/api/.dev.vars (or the environment) and the
@@ -13,6 +14,9 @@
  * Without --ping only GET /v1/models/{model} is called, which consumes no tokens.
  * --ping sends one Responses request (store: false) and prints the real usage
  * reported by the API and its cost at the configured prices.
+ * --web runs one search with the hosted web_search tool, as the assistant
+ * does (store: false), then sends its items back in a second request (the
+ * way a turn continues after a search) and prints the cited pages.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -24,10 +28,11 @@ const OPENAI = 'https://api.openai.com/v1';
 const PING_MAX_OUTPUT_TOKENS = 200;
 
 function parseArgs(argv) {
-  const args = { ping: false, model: '' };
+  const args = { ping: false, web: false, model: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--ping') args.ping = true;
+    else if (a === '--web') args.web = true;
     else if (a === '--model') args.model = String(argv[++i] ?? '').trim();
     else if (a === '--help' || a === '-h') {
       console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('*/')[0]);
@@ -88,6 +93,7 @@ function config(args) {
     model: args.model || get('OPENAI_MODEL'),
     effort: get('AI_REASONING_EFFORT'),
     enabled: get('AI_ENABLED') !== 'false',
+    searchPrice: price('AI_PRICE_WEB_SEARCH_PER_CALL') ?? 0.01,
     prices: {
       input: price('AI_PRICE_INPUT_PER_MTOK'),
       cached: price('AI_PRICE_CACHED_INPUT_PER_MTOK'),
@@ -102,7 +108,7 @@ async function call(path, key, init = {}) {
     res = await fetch(`${OPENAI}${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(90_000),
     });
   } catch (err) {
     fail(`Sem conexão com a OpenAI (${err?.name === 'TimeoutError' ? 'tempo esgotado' : err?.message ?? err}).`);
@@ -150,8 +156,10 @@ async function main() {
   if (model.status !== 200) fail(explain(model.status, model.body, cfg.model));
   console.log('✔ Chave válida e modelo disponível (consulta gratuita, sem tokens).');
 
+  if (args.web) return checkWebSearch(cfg);
   if (!args.ping) {
     console.log('\nPara testar uma resposta real (custa frações de centavo): npm run ai:check -w @mynotes/api -- --ping');
+    console.log('Para testar a pesquisa na web (~US$ 0,01): npm run ai:check -w @mynotes/api -- --web');
     return;
   }
 
@@ -189,6 +197,58 @@ async function main() {
     const cost = ((input - cached) * pIn + cached * (pCached ?? pIn) + output * pOut) / 1e6;
     console.log(`  Custo pelos preços configurados: ${usd(cost)}`);
   }
+}
+
+function outputText(body) {
+  return (body.output ?? [])
+    .filter((item) => item.type === 'message')
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === 'output_text')
+    .map((part) => part.text)
+    .join('')
+    .trim();
+}
+
+function tokenCost(cfg, usage) {
+  const { input: pIn, cached: pCached, output: pOut } = cfg.prices;
+  if (pIn === null || pOut === null) return 0;
+  const input = usage?.input_tokens ?? 0;
+  const cached = usage?.input_tokens_details?.cached_tokens ?? 0;
+  return ((input - cached) * pIn + cached * (pCached ?? pIn) + (usage?.output_tokens ?? 0) * pOut) / 1e6;
+}
+
+/** The same request shape the assistant uses for a turn with web search on. */
+async function checkWebSearch(cfg) {
+  const tool = { type: 'web_search', search_context_size: 'medium', user_location: { type: 'approximate', country: 'BR', timezone: 'America/Sao_Paulo' } };
+  const base = { model: cfg.model, ...(cfg.effort ? { reasoning: { effort: cfg.effort } } : {}), store: false, max_output_tokens: 600 };
+  const question = { role: 'user', content: 'Pesquise na web: quando Brasília foi inaugurada? Responda em uma frase, citando a fonte.' };
+  const first = await call('/responses', cfg.key, {
+    method: 'POST',
+    body: JSON.stringify({ ...base, input: [question], tools: [tool], tool_choice: 'auto', max_tool_calls: 1 }),
+  });
+  if (first.status !== 200) fail(explain(first.status, first.body, cfg.model));
+  const output = first.body.output ?? [];
+  const searches = output.filter((i) => i.type === 'web_search_call');
+  const pages = output
+    .filter((i) => i.type === 'message')
+    .flatMap((i) => i.content ?? [])
+    .flatMap((p) => p.annotations ?? [])
+    .filter((a) => a.type === 'url_citation');
+  console.log(`✔ Resposta com pesquisa (${first.body.status}): ${JSON.stringify(outputText(first.body).slice(0, 160))}`);
+  console.log(`  Buscas: ${searches.length} · páginas citadas: ${pages.length}`);
+  for (const p of pages.slice(0, 5)) console.log(`   - ${p.title || '(sem título)'} — ${p.url}`);
+  if (searches.length === 0) console.log('  ⚠ O modelo respondeu sem pesquisar: a ferramenta foi aceita, mas não foi usada.');
+
+  // A turn goes on after a search with the output items sent back (nothing is stored at OpenAI),
+  // without the web_search tool, as when the turn's searches are spent.
+  const second = await call('/responses', cfg.key, {
+    method: 'POST',
+    body: JSON.stringify({ ...base, input: [question, ...output, { role: 'user', content: 'Agora responda só "ok".' }] }),
+  });
+  if (second.status !== 200) fail(`A continuação depois da pesquisa falhou com store: false. ${explain(second.status, second.body, cfg.model)}`);
+  console.log(`✔ Continuação com os itens da pesquisa devolvidos: ${JSON.stringify(outputText(second.body).slice(0, 40))}`);
+  const cost = tokenCost(cfg, first.body.usage) + tokenCost(cfg, second.body.usage) + searches.length * cfg.searchPrice;
+  console.log(`  Custo pelos preços configurados: ${usd(cost)} (${searches.length} busca(s) a ${usd(cfg.searchPrice)})`);
 }
 
 main();

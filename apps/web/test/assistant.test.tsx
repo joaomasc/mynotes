@@ -19,6 +19,7 @@ const status: AiStatus = {
   spentTodayUsd: 0.0012,
   limits: { messageChars: 4000, toolCallsPerTurn: 8, requestsPerMinute: 6 },
   pricing: { inputPerMTok: 0.1, cachedInputPerMTok: 0.01, outputPerMTok: 0.5 },
+  webSearch: { enabled: true, maxPerTurn: 5, pricePerCallUsd: 0.01 },
   usage: [],
 };
 
@@ -29,13 +30,14 @@ const now = new Date().toISOString();
 function turn(text: string, actions: AiAction[] = [], messageId = uuidv7()): AiChatResponse {
   return {
     conversation: { id: conversationId, title: 'Conversa', contextType: null, contextId: null, messageCount: 2, costUsd: 0.0004, createdAt: now, updatedAt: now },
-    userMessage: { id: messageId, conversationId, role: 'user', content: 'pergunta', sources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt: now },
+    userMessage: { id: messageId, conversationId, role: 'user', content: 'pergunta', sources: [], webSources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt: now },
     assistantMessage: {
       id: uuidv7(),
       conversationId,
       role: 'assistant',
       content: text,
       sources: [{ type: 'note', id: noteId, title: 'David Ricardo', role: 'note', readingId: null, page: null }],
+      webSources: [],
       tools: [{ tool: 'search_knowledge', label: 'Pesquisou “Ricardo”', kind: 'read', ok: true }],
       actionIds: actions.map((a) => a.id),
       status: 'ok',
@@ -185,6 +187,43 @@ describe('assistant chat', () => {
     pressEnter();
     await waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
     expect(chat.mock.calls[1]![0]).toMatchObject({ context: null, conversationId });
+  });
+
+  it('searches the web only when the user turns it on, and lists the pages apart from the notes', async () => {
+    const page = { url: 'https://www.example.com/plano-de-metas', title: '' };
+    const res = turn(`Na web, [o Plano de Metas](${page.url}) acelerou a indústria.`);
+    res.assistantMessage.webSources = [page];
+    res.assistantMessage.tools.push({ tool: 'web_search', label: 'Pesquisou na web “plano de metas”', kind: 'read', ok: true });
+    const chat = vi.spyOn(endpoints.ai, 'chatStream').mockResolvedValue(res);
+    renderChat();
+    const toggle = await screen.findByRole('button', { name: 'Pesquisar na web' });
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText(/Pesquisa na web ligada · até 5 buscas por mensagem, US\$ 0\.01 cada/)).toBeTruthy();
+    type('Pesquise sobre o Plano de Metas');
+    pressEnter();
+    const answer = await screen.findByRole('article', { name: 'Resposta do assistente' });
+    expect(chat.mock.calls[0]![0]).toMatchObject({ webSearch: true });
+    expect(within(answer).getByText(/pesquisou na web \(1\)/)).toBeTruthy();
+    expect(within(answer).getByText('Na web')).toBeTruthy();
+    const link = within(answer).getByRole('link', { name: 'example.com' });
+    expect(link.getAttribute('href')).toBe(page.url);
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+    // Turned off, the next message stays inside MyNotes.
+    fireEvent.click(screen.getByRole('button', { name: 'Desligar a pesquisa na web' }));
+    type('E nas minhas notas?');
+    pressEnter();
+    await waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]![0]).toMatchObject({ webSearch: false });
+  });
+
+  it('hides the web search button when the server turned it off', async () => {
+    vi.spyOn(endpoints.ai, 'status').mockResolvedValue({ ...status, webSearch: { ...status.webSearch, enabled: false } });
+    renderChat();
+    await screen.findByText(/hoje/);
+    expect(screen.queryByRole('button', { name: 'Pesquisar na web' })).toBeNull();
   });
 
   it('explains when the server has no OpenAI key, without offering to send', async () => {

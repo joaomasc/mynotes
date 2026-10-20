@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
-import { ChevronDown, History, MessageSquarePlus, RotateCcw, SendHorizontal, Sparkles, Trash, TriangleAlert, X } from 'lucide-react';
+import { ChevronDown, Globe, History, MessageSquarePlus, RotateCcw, SendHorizontal, Sparkles, Trash, TriangleAlert, X } from 'lucide-react';
 import {
   AI_MESSAGE_MAX,
   ENTITY_LABELS,
@@ -36,6 +36,7 @@ interface Pending {
   text: string;
   context: AiContext | null;
   conversationId: string | null;
+  webSearch: boolean;
   error: unknown;
 }
 
@@ -59,6 +60,15 @@ function syncIndexSoon(now = false) {
 
 const usd = (v: number) => `US$ ${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`;
 
+/** "pt.wikipedia.org" for a page link (the URL itself when it does not parse). */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
 export function AssistantChat({
   context,
   contextTitle,
@@ -78,6 +88,8 @@ export function AssistantChat({
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState<Pending | null>(null);
   const [withContext, setWithContext] = useState(true);
+  // Off by default and turned on by hand: searches cost more and leave MyNotes.
+  const [webSearch, setWebSearch] = useState(false);
   const [deciding, setDeciding] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -97,7 +109,7 @@ export function AssistantChat({
     mutationFn: (p: Pending) => {
       setLive(EMPTY_LIVE);
       return endpoints.ai.chatStream(
-        { conversationId: p.conversationId, messageId: p.messageId, message: p.text, context: p.context },
+        { conversationId: p.conversationId, messageId: p.messageId, message: p.text, context: p.context, webSearch: p.webSearch },
         (event, data) =>
           setLive((l) => {
             if (event === 'delta') return { ...l, text: l.text + (data as { text: string }).text };
@@ -147,6 +159,9 @@ export function AssistantChat({
     },
   });
 
+  const web = status.data?.webSearch;
+  const webAvailable = !!web?.enabled;
+
   const messages = useMemo(() => conversation.data?.messages ?? [], [conversation.data]);
   const actions = useMemo(() => new Map((conversation.data?.actions ?? []).map((a) => [a.id, a])), [conversation.data]);
 
@@ -163,6 +178,7 @@ export function AssistantChat({
       text: message,
       context: withContext ? context : null,
       conversationId,
+      webSearch: webSearch && webAvailable,
       error: null,
     };
     setPending(p);
@@ -319,7 +335,29 @@ export function AssistantChat({
             </button>
           </p>
         )}
+        {web && webAvailable && webSearch && (
+          <p className="mb-1.5 flex items-center gap-1 text-xs text-accent">
+            <Globe className="size-3.5 shrink-0" aria-hidden />
+            <span className="min-w-0 truncate">
+              Pesquisa na web ligada · até {web.maxPerTurn} buscas por mensagem, {usd(web.pricePerCallUsd)} cada
+            </span>
+            <button type="button" onClick={() => setWebSearch(false)} className="ml-auto rounded p-0.5 hover:bg-surface-2 hover:text-text" aria-label="Desligar a pesquisa na web">
+              <X className="size-3.5" />
+            </button>
+          </p>
+        )}
         <div className="flex items-end gap-1.5">
+          {webAvailable && (
+            <IconButton
+              label="Pesquisar na web"
+              aria-pressed={webSearch}
+              active={webSearch}
+              disabled={!ready}
+              onClick={() => setWebSearch((v) => !v)}
+            >
+              <Globe className="size-4" />
+            </IconButton>
+          )}
           <label htmlFor="ai-input" className="sr-only">
             Mensagem para o assistente
           </label>
@@ -331,7 +369,13 @@ export function AssistantChat({
             onKeyDown={onKey}
             rows={1}
             disabled={!ready}
-            placeholder={ready ? 'Pergunte ou peça algo… (Enter envia, Shift+Enter quebra linha)' : 'Assistente indisponível'}
+            placeholder={
+              !ready
+                ? 'Assistente indisponível'
+                : webSearch
+                  ? 'O que pesquisar na web? (Enter envia, Shift+Enter quebra linha)'
+                  : 'Pergunte ou peça algo… (Enter envia, Shift+Enter quebra linha)'
+            }
             className="scrollbar-thin max-h-[200px] min-h-9 flex-1 resize-none rounded-lg border border-border bg-surface px-2.5 py-2 text-sm outline-none focus:border-accent"
           />
           <IconButton
@@ -430,8 +474,11 @@ function MessageView({
   if (message.role === 'event') {
     return <p className="rounded-md bg-surface-2 px-2 py-1 text-center text-xs text-muted">{message.content}</p>;
   }
-  const reads = message.tools.filter((t) => t.kind === 'read');
+  const searches = message.tools.filter((t) => t.tool === 'web_search');
+  const reads = message.tools.filter((t) => t.kind === 'read' && t.tool !== 'web_search');
+  const changes = message.tools.filter((t) => t.kind !== 'read');
   const own = message.actionIds.map((id) => actions.get(id)).filter((a): a is AiAction => !!a);
+  const webSources = message.webSources ?? [];
   return (
     <article aria-label="Resposta do assistente" className="space-y-2">
       <RichText doc={doc!} sources={message.sources} />
@@ -441,7 +488,8 @@ function MessageView({
           <summary className="flex cursor-pointer list-none items-center gap-1 hover:text-text">
             <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" aria-hidden />
             {reads.length > 0 ? `Consultou o MyNotes (${reads.length})` : 'Não consultou suas notas'}
-            {message.tools.length > reads.length && ` · ${message.tools.length - reads.length} alteração(ões)`}
+            {searches.length > 0 && ` · pesquisou na web (${searches.length})`}
+            {changes.length > 0 && ` · ${changes.length} alteração(ões)`}
           </summary>
           <ul className="mt-1 space-y-0.5 pl-5">
             {message.tools.map((t, i) => (
@@ -470,6 +518,27 @@ function MessageView({
                     {s.page ? `, p. ${s.page}` : ''}
                   </span>
                 </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {webSources.length > 0 && (
+        <div>
+          <p className="mb-1 text-[11px] font-semibold tracking-wide text-subtle uppercase">Na web</p>
+          <ul className="flex flex-wrap gap-1">
+            {webSources.map((s) => (
+              <li key={s.url}>
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer nofollow"
+                  title={s.url}
+                  className="inline-flex max-w-56 items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-xs hover:bg-surface-2"
+                >
+                  <Globe className="size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{s.title || hostOf(s.url)}</span>
+                </a>
               </li>
             ))}
           </ul>

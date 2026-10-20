@@ -11,3 +11,4 @@ OPENAI_API_KEY=sk-proj-EXEMPLO-FICTICIO-substitua-pela-sua-chave
 # OPENAI_MODEL=gpt-6-luna
 # AI_ENABLED=false
 # AI_DAILY_BUDGET_USD=0.20
+# AI_WEB_SEARCH=false

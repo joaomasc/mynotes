@@ -1,6 +1,6 @@
 # Assistente de IA
 
-O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e organiza notas, assuntos, relações e mapas. Ele usa a **OpenAI Responses API** com *function calling*: o modelo só **pede** operações; quem consulta e grava é o Worker, com as mesmas regras e serviços do app. Para encontrar o que você escreveu, combina a busca por palavras com uma **busca por sentido** (vetores no Cloudflare Vectorize, gerados com o `bge-m3` do Workers AI), e a resposta aparece em tempo real.
+O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e organiza notas, assuntos, relações e mapas. Ele usa a **OpenAI Responses API** com *function calling*: o modelo só **pede** operações; quem consulta e grava é o Worker, com as mesmas regras e serviços do app. Para encontrar o que você escreveu, combina a busca por palavras com uma **busca por sentido** (vetores no Cloudflare Vectorize, gerados com o `bge-m3` do Workers AI), e a resposta aparece em tempo real. Quando você liga o globo no campo da mensagem, ele também **pesquisa na web** (veja [Pesquisa na web](#pesquisa-na-web)).
 
 ```
  Navegador                          Worker (Hono)                                 OpenAI
@@ -29,7 +29,7 @@ O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e 
 
 ## Ferramentas
 
-Lista explícita em `apps/api/src/modules/assistant/service.ts` (`TOOLS`). Não há SQL livre, acesso genérico ao R2, HTTP arbitrário nem exclusão.
+Lista explícita em `apps/api/src/modules/assistant/service.ts` (`TOOLS`). Não há SQL livre, acesso genérico ao R2, HTTP arbitrário nem exclusão. A única ferramenta fora dessa lista é a `web_search` da própria OpenAI, oferecida só nas mensagens com a pesquisa na web ligada (ela roda na OpenAI, não no Worker).
 
 | Ferramenta | Tipo | O que faz |
 |---|---|---|
@@ -83,6 +83,20 @@ Sem o Vectorize ou o Workers AI (desenvolvimento local com `--local`, cota esgot
 - **Quando atualiza:** a cada 10 minutos (cron), ao abrir o assistente e quando ele mesmo cria algo (`POST /ai/index/sync`, em requisições próprias, fora do turno de conversa). O cron só pega notas paradas há 2 minutos, para não vetorizar a cada salvamento automático. Em *Configurações › Assistente de IA*: progresso, **Indexar agora** e **Refazer índice**.
 - **Consistência:** o Vectorize aplica as mudanças de forma assíncrona. Um item recém-indexado pode levar de alguns segundos a cerca de um minuto para aparecer na busca por sentido (pela busca por palavras, aparece na hora).
 
+## Pesquisa na web
+
+Para buscar fora das suas notas (algo atual, ou aprofundar um assunto), ligue o **globo** ao lado do campo da mensagem. Ele fica desligado por padrão e, depois de ligado, vale para as mensagens seguintes até você desligar (no próprio globo ou no × da faixa “Pesquisa na web ligada”).
+
+- **Como funciona:** só nessas mensagens o Worker acrescenta a ferramenta `web_search` da OpenAI (Responses API) e uma mensagem `developer` explicando como usá-la. A busca roda **na OpenAI**: não gasta invocação, CPU nem consultas D1 do Worker. Os itens `web_search_call` voltam ao modelo como os demais itens da resposta, e cada busca aparece na atividade (“Pesquisou na web “…””). Durante a busca, o status mostra “Pesquisando na web…”.
+- **Fontes:** as páginas vêm das anotações `url_citation` da própria API (só `http`/`https`, cada URL uma vez, até 20) e aparecem na seção **Na web**, separada das **Fontes** do MyNotes, abrindo em nova aba com `rel="noopener noreferrer nofollow"`. Ficam guardadas na mensagem (`ai_messages.meta.webSources`).
+- **Limite:** no máximo `AI_MAX_WEB_SEARCHES` buscas por mensagem (padrão 5), somadas em todas as chamadas ao modelo do turno. Cada chamada recebe `max_tool_calls` com o que sobra; esgotado o limite, a ferramenta sai da lista. As chamadas com busca podem levar até 90 s (em vez de `AI_TIMEOUT_SECONDS`).
+- **Custo:** a OpenAI cobra **por busca** (US$ 10 por 1.000, ou seja, US$ 0,01 cada) além dos tokens do conteúdo lido, que entram como entrada do modelo. O Worker conta os itens `web_search_call` e soma `AI_PRICE_WEB_SEARCH_PER_CALL` × buscas ao custo da mensagem e ao orçamento diário. Uma pesquisa com 3–5 buscas custa cerca de **US$ 0,03–0,05**, ou seja, o orçamento padrão de US$ 0,50 dá umas 10–15 pesquisas por dia. Pode haver diferença em relação à fatura (a OpenAI pode contar como buscas extras as aberturas de página); confira em *Usage*.
+- **Segurança:** páginas da web são dados não confiáveis. Num turno com pesquisa, **toda escrita vira proposta** (`writeIntent` é falso), mesmo que você peça “pesquise e crie uma nota”: nada é gravado sem clicar em **Confirmar**. As demais defesas continuam valendo (sem exclusão, links `mynotes:` verificados, sem HTML).
+- **Privacidade:** `store: false` continua valendo, mas as consultas saem para a web pelo buscador da OpenAI, e o modelo pode usar trechos das suas notas para formular as buscas. Por isso a pesquisa é ligada por você, mensagem a mensagem.
+- **Desligar:** `AI_WEB_SEARCH=false` some com o globo e recusa `webSearch: true` (400).
+
+Antes de publicar, confira com uma chamada real (uma busca, ~US$ 0,01) se o modelo e a conta aceitam a pesquisa com `store: false`, inclusive a continuação depois dela: `npm run ai:check -w @mynotes/api -- --web`.
+
 ## PDFs
 
 O texto dos PDFs **não é extraído nem indexado** (o leitor usa pdf.js no navegador; extrair no Worker estouraria os 10 ms de CPU do plano gratuito). O assistente encontra livros e documentos por título, autor e nome do arquivo, e lê **as anotações por página** — com o trecho citado e o número da página registrados por você, que são confiáveis. Ele não inventa páginas. Próximo passo possível: extrair o texto no navegador (pdf.js) ao abrir o livro e enviar por página para uma tabela própria.
@@ -102,7 +116,10 @@ O texto dos PDFs **não é extraído nem indexado** (o leitor usa pdf.js no nave
 | `AI_MAX_REQUESTS_PER_MINUTE` | `vars` | `6` | Mensagens por minuto. |
 | `AI_DAILY_BUDGET_USD` | `vars` | `0.50` | Recusa novas mensagens quando o gasto do dia (UTC) chega ao valor. `none` = sem limite do app. |
 | `AI_PRICE_INPUT_PER_MTOK`, `AI_PRICE_CACHED_INPUT_PER_MTOK`, `AI_PRICE_OUTPUT_PER_MTOK` | `vars` | `0.10`, `0.01`, `0.50` | Preço (US$ por 1M de tokens) do modelo configurado, para converter o uso real em custo. Obrigatórios quando há orçamento. |
-| `AI_TIMEOUT_SECONDS` | `vars` (opcional) | `45` | Tempo máximo de cada chamada à OpenAI. |
+| `AI_TIMEOUT_SECONDS` | `vars` (opcional) | `45` | Tempo máximo de cada chamada à OpenAI (com pesquisa na web: pelo menos 90 s). |
+| `AI_WEB_SEARCH` | `vars` | `true` | `false` desliga a pesquisa na web (o globo some). |
+| `AI_MAX_WEB_SEARCHES` | `vars` | `5` | Buscas na web por mensagem (1 a 10). |
+| `AI_PRICE_WEB_SEARCH_PER_CALL` | `vars` | `0.01` | US$ por busca, somado ao custo e ao orçamento. Inválido ou ausente → `0.01` (nunca grátis). |
 
 Valores inválidos caem nos padrões seguros (nunca em “ilimitado”). Os preços padrão são os da [tabela oficial](https://developers.openai.com/api/docs/pricing) para `gpt-6-luna` (Standard), conferidos em 20/10/2026. **Ao trocar o modelo, atualize os preços.**
 
@@ -119,6 +136,7 @@ Valores inválidos caem nos padrões seguros (nunca em “ilimitado”). Os pre�
 #   OPENAI_API_KEY=sk-...
 npm run ai:check -w @mynotes/api            # valida chave e modelo — gratuito (GET /v1/models)
 npm run ai:check -w @mynotes/api -- --ping  # 1 resposta real mínima, mostra tokens e custo (~US$ 0,00001)
+npm run ai:check -w @mynotes/api -- --web   # 1 busca real na web + continuação com store: false (~US$ 0,01)
 npm run db:migrate:local -w @mynotes/api    # cria as tabelas ai_* e knowledge_index no D1 local
 npm run dev:api                              # wrangler dev --local (lê .dev.vars): busca só por palavras
 npm run dev:ai -w @mynotes/api               # com Workers AI e Vectorize reais (precisa de wrangler login)
@@ -145,7 +163,7 @@ As migrações `0003` e `0004` são aditivas: criam `ai_conversations`, `ai_mess
 ## Consumo
 
 - **No app:** *Configurações › Assistente de IA* mostra o gasto de hoje, o orçamento e os últimos 30 dias (mensagens, tokens de entrada/cache/saída e custo). Cada resposta guarda seus tokens e custo (`ai_messages`), e cada conversa tem o total.
-- **Nos logs do Worker:** uma linha `{"msg":"ai turn", model, calls, tools, input_tokens, cached_tokens, output_tokens, reasoning_tokens, cost_usd, ms}` por mensagem — sem conteúdo.
+- **Nos logs do Worker:** uma linha `{"msg":"ai turn", model, calls, tools, input_tokens, cached_tokens, output_tokens, reasoning_tokens, web_searches, cost_usd, ms}` por mensagem — sem conteúdo.
 - **Na OpenAI:** o valor oficial está em [platform.openai.com/usage](https://platform.openai.com/usage).
 
 O custo é calculado com os tokens que a própria API informa em cada resposta e os preços configurados. Referência medida em testes reais com `gpt-6-luna`, com pré-busca e streaming: **~US$ 0,0002 a 0,0005 por mensagem** (~4 mil tokens de entrada, boa parte em cache; ~100 de saída), **primeiro texto em ~2 s e resposta completa em ~3 s** quando a pré-busca basta (antes eram 5,5–6,8 s, com tudo aparecendo no fim). Os embeddings (`bge-m3`, US$ 0,0118 por 1M tokens) saem da cota diária gratuita do Workers AI, a mesma do ditado. Com US$ 5, são milhares de mensagens. O orçamento diário padrão (US$ 0,50) é checado antes de cada mensagem e entre as chamadas ao modelo, e pode ser ultrapassado por no máximo uma chamada.

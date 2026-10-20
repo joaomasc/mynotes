@@ -67,7 +67,13 @@
     // Update together with OPENAI_MODEL.
     "AI_PRICE_INPUT_PER_MTOK": "0.10",
     "AI_PRICE_CACHED_INPUT_PER_MTOK": "0.01",
-    "AI_PRICE_OUTPUT_PER_MTOK": "0.50"
+    "AI_PRICE_OUTPUT_PER_MTOK": "0.50",
+    // OpenAI's hosted web search, only in messages where the user turns it on (globe button).
+    // "false" hides it. Each search is billed per call on top of tokens: US$ 10 / 1k calls
+    // (developers.openai.com/api/docs/pricing, checked 2026-10-20), counted in the daily budget.
+    "AI_WEB_SEARCH": "true",
+    "AI_MAX_WEB_SEARCHES": "5",
+    "AI_PRICE_WEB_SEARCH_PER_CALL": "0.01"
   }
   // Secrets (never commit): AUTH_SECRET — set with `wrangler secret put AUTH_SECRET`;
   // OPENAI_API_KEY — set with `wrangler secret put OPENAI_API_KEY` (locally: apps/api/.dev.vars).

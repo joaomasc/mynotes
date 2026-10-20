@@ -51,6 +51,33 @@ export const callTools =
     return body.stream ? sse([{ type: 'response.completed', response }]) : response;
   };
 
+/** Searches the hosted web_search tool ran within a response (on OpenAI's side). */
+const searchCalls = (queries: string[]) =>
+  queries.map((query, i) => ({ type: 'web_search_call', id: `ws_${i}`, status: 'completed', action: { type: 'search', query } }));
+
+/** The model searched the web and answered, citing pages with url_citation annotations. */
+export const webAnswer =
+  (text: string, queries: string[], pages: { url: string; title: string }[]): Step =>
+  (body) => {
+    const annotations = pages.map((p) => ({ type: 'url_citation', url: p.url, title: p.title, start_index: 0, end_index: text.length }));
+    const output = [...searchCalls(queries), { type: 'message', role: 'assistant', content: [{ type: 'output_text', text, annotations }] }];
+    const response = { id: 'resp_web', status: 'completed', output, usage };
+    if (!body.stream) return response;
+    return sse([
+      ...queries.map((_, i) => ({ type: 'response.web_search_call.searching', item_id: `ws_${i}` })),
+      { type: 'response.output_text.delta', delta: text },
+      { type: 'response.completed', response },
+    ]);
+  };
+
+/** The model searched the web, then asked for MyNotes tools. */
+export const searchThenCall =
+  (queries: string[], ...list: [name: string, args: unknown][]): Step =>
+  (body) => {
+    const response = { id: 'resp_web_tools', status: 'completed', output: [...searchCalls(queries), ...calls(list)], usage };
+    return body.stream ? sse([{ type: 'response.completed', response }]) : response;
+  };
+
 export function sse(events: ({ type: string } & Record<string, unknown>)[]): Response {
   return new Response(events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''), {
     headers: { 'Content-Type': 'text/event-stream' },

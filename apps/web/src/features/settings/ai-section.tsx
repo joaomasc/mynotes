@@ -128,6 +128,12 @@ export function AiSection() {
         <dd>
           {s.limits.requestsPerMinute} mensagens/min · {s.limits.toolCallsPerTurn} consultas por mensagem · {int(s.limits.messageChars)} caracteres
         </dd>
+        <dt className="text-muted">Pesquisa na web</dt>
+        <dd>
+          {s.webSearch.enabled
+            ? `Disponível (botão do globo, por mensagem) · até ${s.webSearch.maxPerTurn} buscas por mensagem · US$ ${s.webSearch.pricePerCallUsd} por busca`
+            : 'Desativada (AI_WEB_SEARCH=false)'}
+        </dd>
         {s.pricing && (
           <>
             <dt className="text-muted">Preço usado (1M tokens)</dt>

@@ -98,6 +98,7 @@ export async function mockAssistant(page: Page, answer: string): Promise<Record<
         spentTodayUsd: 0,
         limits: { messageChars: 4000, toolCallsPerTurn: 8, requestsPerMinute: 6 },
         pricing: { inputPerMTok: 0.1, cachedInputPerMTok: 0.01, outputPerMTok: 0.5 },
+        webSearch: { enabled: true, maxPerTurn: 5, pricePerCallUsd: 0.01 },
         usage: [],
       });
     }
@@ -109,13 +110,14 @@ export async function mockAssistant(page: Page, answer: string): Promise<Record<
       bodies.push(body);
       const done = {
         conversation: { id: conversationId, title: String(body.message), contextType: null, contextId: null, messageCount: 2, costUsd: 0.0004, createdAt: now, updatedAt: now },
-        userMessage: { id: body.messageId, conversationId, role: 'user', content: body.message, sources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt: now },
+        userMessage: { id: body.messageId, conversationId, role: 'user', content: body.message, sources: [], webSources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt: now },
         assistantMessage: {
           id: '01900000-0000-7000-8000-0000000000b1',
           conversationId,
           role: 'assistant',
           content: answer,
           sources: [],
+          webSources: [],
           tools: [{ tool: 'get_topic_tree', label: 'Consultou a árvore de assuntos', kind: 'read', ok: true }],
           actionIds: [action.id],
           status: 'ok',

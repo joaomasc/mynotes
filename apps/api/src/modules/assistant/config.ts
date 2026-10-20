@@ -29,6 +29,14 @@ export interface AiConfig {
   prices: AiPrices | null;
   timeoutMs: number;
   messageMax: number;
+  /** OpenAI's hosted web search, used only in turns where the user turns it on. */
+  webSearch: {
+    enabled: boolean;
+    /** Searches the model may run in one turn. */
+    maxPerTurn: number;
+    /** USD per search call, billed apart from tokens. */
+    pricePerCall: number;
+  };
 }
 
 /** Secrets and vars the assistant reads (all optional in the generated Env type). */
@@ -45,7 +53,10 @@ type AiEnv = Partial<
     | 'AI_PRICE_INPUT_PER_MTOK'
     | 'AI_PRICE_CACHED_INPUT_PER_MTOK'
     | 'AI_PRICE_OUTPUT_PER_MTOK'
-    | 'AI_TIMEOUT_SECONDS',
+    | 'AI_TIMEOUT_SECONDS'
+    | 'AI_WEB_SEARCH'
+    | 'AI_MAX_WEB_SEARCHES'
+    | 'AI_PRICE_WEB_SEARCH_PER_CALL',
     string
   >
 >;
@@ -54,6 +65,8 @@ const DEFAULT_MODEL = 'gpt-6-luna';
 const DEFAULT_BUDGET_USD = 0.5;
 /** Default and ceiling of AI_MAX_TOOL_CALLS: 30 tool invocations + the chat request stay under the 32 per request. */
 const MAX_TOOL_CALLS = 30;
+/** OpenAI's price per web search call (developers.openai.com/api/docs/pricing, checked 2026-10-20). */
+const DEFAULT_WEB_SEARCH_PRICE = 0.01;
 
 function intIn(value: string | undefined, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(value ?? '', 10);
@@ -92,6 +105,12 @@ export function aiConfig(env: Env): AiConfig {
         : null,
     timeoutMs: intIn(e.AI_TIMEOUT_SECONDS, 45, 5, 120) * 1000,
     messageMax: AI_MESSAGE_MAX,
+    webSearch: {
+      enabled: e.AI_WEB_SEARCH?.trim().toLowerCase() !== 'false',
+      maxPerTurn: intIn(e.AI_MAX_WEB_SEARCHES, 5, 1, 10),
+      // A missing price would hide the most expensive part of a turn from the budget.
+      pricePerCall: nonNegative(e.AI_PRICE_WEB_SEARCH_PER_CALL) ?? DEFAULT_WEB_SEARCH_PRICE,
+    },
   };
 }
 
@@ -134,11 +153,14 @@ export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   };
 }
 
-/** Cost of the usage reported by the API at the configured prices (0 when prices are unknown). */
-export function costOf(usage: TokenUsage, prices: AiPrices | null): number {
-  if (!prices) return 0;
+/**
+ * Cost of the usage reported by the API at the configured prices (tokens count
+ * as 0 when prices are unknown), plus the web searches, billed per call.
+ */
+export function costOf(usage: TokenUsage, prices: AiPrices | null, webSearches = 0, pricePerSearch = 0): number {
   const uncached = Math.max(0, usage.inputTokens - usage.cachedTokens);
-  const cost =
-    uncached * prices.inputPerMTok + usage.cachedTokens * prices.cachedInputPerMTok + usage.outputTokens * prices.outputPerMTok;
-  return Math.round((cost / 1e6) * 1e8) / 1e8;
+  const tokens = prices
+    ? uncached * prices.inputPerMTok + usage.cachedTokens * prices.cachedInputPerMTok + usage.outputTokens * prices.outputPerMTok
+    : 0;
+  return Math.round((tokens / 1e6 + webSearches * pricePerSearch) * 1e8) / 1e8;
 }

@@ -14,6 +14,7 @@ import {
   type AiSource,
   type AiStatus,
   type AiToolActivity,
+  type AiWebSource,
   type SearchEntityType,
 } from '@mynotes/shared';
 import { ApiError, badRequest, notFound } from '../../lib/errors';
@@ -22,8 +23,21 @@ import { entityKey, resolveEntities, type EntityRef } from '../../lib/entities';
 import { isoBefore, nowIso } from '../../lib/time';
 import { PlanError, toAction } from './actions';
 import { addUsage, aiConfig, costOf, requireReady, ZERO_USAGE, type AiConfig, type TokenUsage } from './config';
-import { createResponse, createResponseStream, functionCalls, outputText, type FunctionCallItem, type FunctionTool, type InputItem, type ResponsesResult } from './openai';
-import { hasWriteIntent, systemInstructions } from './prompt';
+import {
+  createResponse,
+  createResponseStream,
+  functionCalls,
+  outputText,
+  urlCitations,
+  webSearchCalls,
+  type FunctionCallItem,
+  type FunctionTool,
+  type InputItem,
+  type ResponsesResult,
+  type WebSearchCallItem,
+  type WebSearchTool,
+} from './openai';
+import { hasWriteIntent, systemInstructions, webSearchMessage } from './prompt';
 import { graphTools } from './tools/graph';
 import { hybridSearch, presentResults, readTools } from './tools/read';
 import { SourceCollector, truncate, type SourceInfo, type ToolContext, type ToolOutput } from './tools/types';
@@ -39,6 +53,12 @@ const FUNCTION_TOOLS: FunctionTool[] = TOOLS.map((t) => ({
   parameters: t.parameters,
   strict: true,
 }));
+/** Added to the tools only in turns where the user turned web search on. */
+const WEB_SEARCH_TOOL: WebSearchTool = {
+  type: 'web_search',
+  search_context_size: 'medium',
+  user_location: { type: 'approximate', country: 'BR', timezone: 'America/Sao_Paulo' },
+};
 
 /** Previous messages sent to the model, each cut to HISTORY_CHARS. */
 const HISTORY_MESSAGES = 12;
@@ -52,6 +72,9 @@ const TOOL_OUTPUT_MAX = 16_000;
 /** A user message without an answer newer than this is still being processed. */
 const IN_FLIGHT_SECONDS = 180;
 const TURN_DEADLINE_MS = 100_000;
+/** A model call that searches the web takes longer than one that reads MyNotes. */
+const WEB_SEARCH_TIMEOUT_MS = 90_000;
+const WEB_SOURCES_MAX = 20;
 const CONVERSATIONS_LIST_MAX = 50;
 const CONVERSATION_MESSAGES_MAX = 200;
 
@@ -59,6 +82,7 @@ const CONVERSATION_MESSAGES_MAX = 200;
 
 interface MessageMeta {
   sources?: AiSource[];
+  webSources?: AiWebSource[];
   tools?: AiToolActivity[];
   actionIds?: string[];
 }
@@ -72,6 +96,7 @@ function toMessage(r: Row): AiMessage {
     role,
     content: str(r.content),
     sources: meta.sources ?? [],
+    webSources: meta.webSources ?? [],
     tools: meta.tools ?? [],
     actionIds: meta.actionIds ?? [],
     status: (str(r.status) || 'ok') as AiMessage['status'],
@@ -262,7 +287,22 @@ const TOOL_NAMES: Record<string, string> = {
   move_topic: 'Mover assunto',
   create_relations: 'Criar relações',
   propose_mind_map: 'Mapa mental',
+  web_search: 'Pesquisa na web',
 };
+
+/** Activity line of a search the hosted web_search tool ran. */
+function webSearchActivity(call: WebSearchCallItem): AiToolActivity {
+  const query = call.action?.query ?? call.action?.queries?.[0] ?? '';
+  const label =
+    call.action?.type === 'open_page'
+      ? 'Abriu uma página da web'
+      : call.action?.type === 'find_in_page'
+        ? 'Procurou dentro de uma página da web'
+        : query
+          ? `Pesquisou na web “${truncate(query, 80).text}”`
+          : 'Pesquisou na web';
+  return { tool: 'web_search', label, kind: 'read', ok: call.status !== 'failed' };
+}
 
 function serialize(output: ToolOutput): string {
   const json = JSON.stringify(output);
@@ -352,6 +392,7 @@ export interface ChatInput {
   messageId: string;
   message: string;
   context: AiContext | null;
+  webSearch: boolean;
 }
 
 async function replay(db: D1Database, userId: string, conversationId: string, userMessageId: string, replyId: string): Promise<AiChatResponse> {
@@ -411,6 +452,9 @@ export async function prepareTurn(
   input: ChatInput,
 ): Promise<PreparedTurn | { kind: 'replay'; response: AiChatResponse }> {
   const cfg = requireReady(aiConfig(env));
+  if (input.webSearch && !cfg.webSearch.enabled) {
+    throw badRequest('A pesquisa na web está desativada nesta instalação (AI_WEB_SEARCH=false).');
+  }
   const db = env.DB;
   const started = Date.now();
   const now = nowIso();
@@ -620,23 +664,28 @@ export async function runTurn(
 ): Promise<AiChatResponse> {
   const { env, cfg, userId, input } = t;
   const db = env.DB;
+  const web = input.webSearch && cfg.webSearch.enabled;
   const ctx: TurnState = {
     userId,
     conversationId: t.conversationId,
     focus: input.context,
     sources: new SourceCollector(),
     actions: [],
-    writeIntent: hasWriteIntent(input.message),
+    // Web pages could carry instructions: in a turn that reads them, writes are only proposed.
+    writeIntent: !web && hasWriteIntent(input.message),
   };
   if (input.context) ctx.sources.add({ type: input.context.type, id: input.context.id, title: t.focusTitle });
   const info: TurnInfo = { userId, conversationId: t.conversationId, isNew: t.isNew, input, now: t.now, today: t.today, started: t.started };
 
   const items: InputItem[] = historyItems(t.history);
   if (input.context) items.push(focusMessage(input.context, t.focusTitle));
+  if (web) items.push({ role: 'developer', content: webSearchMessage(cfg.webSearch.maxPerTurn) });
 
   let usage: TokenUsage = ZERO_USAGE;
   let calls = 0;
   let toolCalls = 0;
+  let searches = 0;
+  const cost = () => costOf(usage, cfg.prices, searches, cfg.webSearch.pricePerCall);
   const activity: AiToolActivity[] = [];
   const instructions = systemInstructions(t.today);
 
@@ -652,21 +701,40 @@ export async function runTurn(
 
     let final: ResponsesResult | null = null;
     for (let round = 0; ; round++) {
-      const spent = t.spentToday + costOf(usage, cfg.prices);
+      const spent = t.spentToday + cost();
       const overBudget = cfg.dailyBudgetUsd !== null && spent >= cfg.dailyBudgetUsd;
       // Out of tools, rounds, time or budget: one last call that must answer in text.
       const mustAnswer = toolCalls >= cfg.maxToolCalls || round >= MAX_ROUNDS || Date.now() - t.started > TURN_DEADLINE_MS || overBudget;
+      const searchesLeft = web && !mustAnswer ? cfg.webSearch.maxPerTurn - searches : 0;
       emit({ type: 'status', data: { label: round === 0 ? 'Pensando…' : 'Escrevendo a resposta…' } });
-      const req = { instructions, input: items, tools: FUNCTION_TOOLS, toolChoice: mustAnswer ? ('none' as const) : ('auto' as const) };
+      const req = {
+        instructions,
+        input: items,
+        tools: searchesLeft > 0 ? [...FUNCTION_TOOLS, WEB_SEARCH_TOOL] : FUNCTION_TOOLS,
+        toolChoice: mustAnswer ? ('none' as const) : ('auto' as const),
+        ...(searchesLeft > 0 ? { maxHostedToolCalls: searchesLeft, timeoutMs: Math.max(cfg.timeoutMs, WEB_SEARCH_TIMEOUT_MS) } : {}),
+      };
       let streamed = false;
       const res = opts.stream
-        ? await createResponseStream(cfg, req, (text) => {
-            streamed = true;
-            emit({ type: 'delta', data: { text } });
-          })
+        ? await createResponseStream(
+            cfg,
+            req,
+            (text) => {
+              streamed = true;
+              emit({ type: 'delta', data: { text } });
+            },
+            () => emit({ type: 'status', data: { label: 'Pesquisando na web…' } }),
+          )
         : await createResponse(cfg, req);
       calls++;
       usage = addUsage(usage, res.usage);
+      // Searches ran on OpenAI's side within this call: count them (each one is billed) and show them.
+      for (const search of webSearchCalls(res.output)) {
+        searches++;
+        const run = webSearchActivity(search);
+        activity.push(run);
+        emit({ type: 'tool', data: run });
+      }
       const requested = functionCalls(res.output);
       if (requested.length === 0 || mustAnswer) {
         final = res;
@@ -702,10 +770,11 @@ export async function runTurn(
         : 'A resposta excedeu o limite de tamanho configurado (AI_MAX_OUTPUT_TOKENS). Tente pedir algo mais específico.';
     }
     if (!text) text = 'Não consegui redigir uma resposta. Tente perguntar de outro jeito.';
-    return await saveTurn(db, cfg, info, ctx, { text, status, usage, calls, activity });
+    const webSources = urlCitations(final.output).slice(0, WEB_SOURCES_MAX);
+    return await saveTurn(db, cfg, info, ctx, { text, status, usage, calls, activity, searches, webSources });
   } catch (err) {
     if (calls > 0) {
-      await usageStatement(db, userId, t.today, usage, costOf(usage, cfg.prices), 1)
+      await usageStatement(db, userId, t.today, usage, cost(), 1)
         .run()
         .catch(() => undefined);
     }
@@ -719,6 +788,8 @@ export async function runTurn(
         usage,
         calls,
         activity,
+        searches,
+        webSources: [],
         usageRecorded: true,
       });
     }
@@ -764,7 +835,16 @@ async function saveTurn(
   cfg: AiConfig,
   t: TurnInfo,
   ctx: TurnState,
-  r: { text: string; status: AiMessage['status']; usage: TokenUsage; calls: number; activity: AiToolActivity[]; usageRecorded?: boolean },
+  r: {
+    text: string;
+    status: AiMessage['status'];
+    usage: TokenUsage;
+    calls: number;
+    activity: AiToolActivity[];
+    searches: number;
+    webSources: AiWebSource[];
+    usageRecorded?: boolean;
+  },
 ): Promise<AiChatResponse> {
   const { content, cited } = await verifyCitations(db, t.userId, r.text, ctx.sources);
   // Sources: what the answer cites, then what was read in full.
@@ -775,11 +855,11 @@ async function saveTurn(
     }
   }
   const sourceList = [...sources.values()].slice(0, 12);
-  const cost = costOf(r.usage, cfg.prices);
+  const cost = costOf(r.usage, cfg.prices, r.searches, cfg.webSearch.pricePerCall);
   const id = uuidv7();
   const created = nowIso();
   const actionIds = ctx.actions.map((a) => a.id);
-  const meta = JSON.stringify({ sources: sourceList, tools: r.activity, actionIds });
+  const meta = JSON.stringify({ sources: sourceList, webSources: r.webSources, tools: r.activity, actionIds });
   const statements = [
     stmt(
       db,
@@ -834,6 +914,7 @@ async function saveTurn(
       cached_tokens: r.usage.cachedTokens,
       output_tokens: r.usage.outputTokens,
       reasoning_tokens: r.usage.reasoningTokens,
+      web_searches: r.searches,
       cost_usd: cost,
       status: r.status,
       ms: Date.now() - t.started,
@@ -849,6 +930,7 @@ async function saveTurn(
       role: 'user',
       content: t.input.message,
       sources: [],
+      webSources: [],
       tools: [],
       actionIds: [],
       status: 'ok',
@@ -861,6 +943,7 @@ async function saveTurn(
       role: 'assistant',
       content,
       sources: sourceList,
+      webSources: r.webSources,
       tools: r.activity,
       actionIds,
       status: r.status,
@@ -929,6 +1012,7 @@ export async function aiStatus(env: Env, userId: string): Promise<AiStatus> {
     spentTodayUsd: num(rows.find((r) => r.day === today)?.cost_usd),
     limits: { messageChars: cfg.messageMax, toolCallsPerTurn: cfg.maxToolCalls, requestsPerMinute: cfg.requestsPerMinute },
     pricing: cfg.prices,
+    webSearch: { enabled: cfg.webSearch.enabled, maxPerTurn: cfg.webSearch.maxPerTurn, pricePerCallUsd: cfg.webSearch.pricePerCall },
     usage: rows.map((r) => ({
       day: str(r.day),
       requests: num(r.requests),
