@@ -150,7 +150,8 @@ describe('assistant building blocks', () => {
     expect(cfgOf({ AI_DAILY_BUDGET_USD: 'none' }).dailyBudgetUsd).toBeNull();
     const cfg = cfgOf({ AI_MAX_TOOL_CALLS: 'abc', AI_DAILY_BUDGET_USD: '-3' });
     expect(cfg.model).toBe('gpt-6-luna');
-    expect(cfg.maxToolCalls).toBe(8);
+    expect(cfg.maxToolCalls).toBe(30);
+    expect(cfgOf({ AI_MAX_TOOL_CALLS: '100' }).maxToolCalls).toBe(30);
     expect(cfg.dailyBudgetUsd).toBe(0.5);
     // 1000 uncached input, 200 cached, 80 output at 0.10 / 0.01 / 0.50 per 1M tokens.
     expect(costOf({ inputTokens: 1200, cachedTokens: 200, outputTokens: 80, reasoningTokens: 20 }, cfg.prices)).toBeCloseTo(0.000142, 9);
@@ -360,13 +361,14 @@ describe('assistant: grounded answers', () => {
 
   it('caps tool calls per turn and then forces a text answer', async () => {
     const search = callTools(['search_knowledge', { query: 'x', types: null, limit: 1 }], ['search_knowledge', { query: 'y', types: null, limit: 1 }]);
-    const { bodies } = mockOpenAI([search, search, search, search, search, answer('Chega de buscas.')]);
+    const { bodies } = mockOpenAI([...Array<typeof search>(16).fill(search), answer('Chega de buscas.')]);
     const res = await send('Pesquise tudo');
     expect(res.status).toBe(200);
-    // 8 calls in 4 rounds, then one call that cannot use tools.
-    expect(bodies).toHaveLength(5);
-    expect(bodies[4].tool_choice).toBe('none');
-    expect(res.body.data.assistantMessage.tools).toHaveLength(8);
+    // 30 calls in 15 rounds, then one call that cannot use tools.
+    expect(bodies).toHaveLength(16);
+    expect(bodies[15].tool_choice).toBe('none');
+    expect(res.body.data.assistantMessage.tools).toHaveLength(30);
+    expect(res.body.data.assistantMessage.tools.every((t: any) => t.ok)).toBe(true);
   });
 
   it('reads topics, tags, the library with page annotations and topic mind maps', async () => {
@@ -400,13 +402,18 @@ describe('assistant: grounded answers', () => {
     expect(res.body.data.assistantMessage.tools.map((x: any) => x.ok)).toEqual([true, true, true, true, true, true]);
   });
 
-  it('stops tools that would exceed the per-request database budget', async () => {
-    const topics = Array.from({ length: 4 }, () => ['get_topic', { topic_id: uuidv7() }] as [string, unknown]);
-    const { bodies } = mockOpenAI([callTools(...topics), answer('Parei.')]);
-    await send('Abra quatro assuntos');
-    const outputs = toolOutputs(bodies[1]);
-    // get_topic runs 8 statements: three fit in the budget of 30, the fourth is refused.
-    expect(outputs.map((o) => o.error)).toEqual(['not_found', 'not_found', 'not_found', 'request_limit']);
+  it('runs each tool in its own invocation, so a turn may read more than one request allows', async () => {
+    const t = await topic('Economia Política');
+    await note('Mais-valia', 'Trabalho não pago.', t.id);
+    // get_topic runs up to 8 statements: 8 reads go past the 50 D1 queries of a single request.
+    const reads = Array.from({ length: 8 }, () => ['get_topic', { topic_id: t.id }] as [string, unknown]);
+    const { bodies } = mockOpenAI([callTools(...reads), answer('Pronto.')]);
+    const res = await send('Abra o assunto oito vezes');
+    expect(res.status).toBe(200);
+    expect(toolOutputs(bodies[1]).map((o) => o.title)).toEqual(Array(8).fill('Economia Política'));
+    expect(res.body.data.assistantMessage.tools.every((x: any) => x.ok)).toBe(true);
+    // What the tools read in their own invocations still counts as the turn's sources.
+    expect(res.body.data.assistantMessage.sources).toEqual([expect.objectContaining({ type: 'topic', id: t.id })]);
   });
 
   it('finds the path between two notes in the graph and their connections', async () => {

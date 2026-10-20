@@ -22,7 +22,7 @@ O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e 
 
 1. `POST /api/v1/ai/chat` com `{ messageId, message, conversationId?, context? }`. O `messageId` é gerado pelo navegador: reenviar o mesmo id devolve a resposta já dada (`replayed: true`) sem chamar o modelo de novo.
 2. O Worker autentica, valida o payload (Zod), aplica o limite por minuto e o orçamento diário, confere que o item em contexto existe e é seu, e monta a entrada: até 12 mensagens anteriores (cortadas em 1.500 caracteres), uma mensagem `developer` com o item aberto (tipo, id e título — nunca o conteúdo) e a pergunta.
-3. O modelo pode chamar ferramentas. Cada chamada é revalidada com Zod, executada com `user_id` em todas as consultas e devolvida como JSON. No máximo `AI_MAX_TOOL_CALLS` chamadas e 6 rodadas por turno; esgotado o limite, uma última chamada com `tool_choice: "none"` obriga o modelo a responder.
+3. O modelo pode chamar ferramentas. Cada chamada é revalidada com Zod, executada com `user_id` em todas as consultas e devolvida como JSON. Cada ferramenta roda numa invocação própria do Worker (entrypoint `AssistantTools`, chamada por `exports` de `cloudflare:workers`), com seu próprio limite de consultas D1. No máximo `AI_MAX_TOOL_CALLS` chamadas e 16 rodadas por turno; esgotado o limite, uma última chamada com `tool_choice: "none"` obriga o modelo a responder.
 4. A resposta passa por verificação de citações: links `mynotes:<tipo>/<id>` só ficam se o item existir e for seu; os demais viram texto. As fontes exibidas são os itens citados e os lidos por inteiro.
 5. Mensagens, atividade das ferramentas (só rótulos), fontes, tokens e custo vão para o D1. Resultados brutos de ferramentas **não** são guardados.
 
@@ -86,7 +86,7 @@ O texto dos PDFs **não é extraído nem indexado** (o leitor usa pdf.js no nave
 | `OPENAI_MODEL` | `vars` | `gpt-6-luna` | Qualquer modelo da Responses API com function calling. |
 | `AI_REASONING_EFFORT` | `vars` | `low` | `none` · `minimal` · `low` · `medium` · `high` (vazio = padrão do modelo). Raciocínio é cobrado como saída. |
 | `AI_MAX_OUTPUT_TOKENS` | `vars` | `2000` | Teto de saída por chamada ao modelo. |
-| `AI_MAX_TOOL_CALLS` | `vars` | `8` | Chamadas de ferramenta por mensagem. |
+| `AI_MAX_TOOL_CALLS` | `vars` | `30` | Chamadas de ferramenta por mensagem (máximo 30: cada uma é uma invocação, e a Cloudflare permite 32 por requisição). |
 | `AI_MAX_REQUESTS_PER_MINUTE` | `vars` | `6` | Mensagens por minuto. |
 | `AI_DAILY_BUDGET_USD` | `vars` | `0.50` | Recusa novas mensagens quando o gasto do dia (UTC) chega ao valor. `none` = sem limite do app. |
 | `AI_PRICE_INPUT_PER_MTOK`, `AI_PRICE_CACHED_INPUT_PER_MTOK`, `AI_PRICE_OUTPUT_PER_MTOK` | `vars` | `0.10`, `0.01`, `0.50` | Preço (US$ por 1M de tokens) do modelo configurado, para converter o uso real em custo. Obrigatórios quando há orçamento. |
@@ -148,15 +148,15 @@ A suíte normal nunca chama a OpenAI: a chave dos testes é falsa (`vitest.confi
 
 ## Adicionar uma ferramenta
 
-1. Escreva a definição com `defineTool` em `apps/api/src/modules/assistant/tools/` (`read.ts`, `graph.ts` ou `write.ts`): `name`, `kind` (`read`/`write`/`sensitive`), `description` (curta, em inglês), `parameters` com os construtores `S.*` (modo estrito: todo campo obrigatório, opcionais como `null`), `args` (Zod, a validação que vale), `dbCost` (instruções D1 que costuma usar), `label` (texto da atividade, em português) e `run`.
-2. Toda consulta filtra por `ctx.userId`. Use `ctx.db` (conta as instruções) e registre os itens retornados em `ctx.sources`.
+1. Escreva a definição com `defineTool` em `apps/api/src/modules/assistant/tools/` (`read.ts`, `graph.ts` ou `write.ts`): `name`, `kind` (`read`/`write`/`sensitive`), `description` (curta, em inglês), `parameters` com os construtores `S.*` (modo estrito: todo campo obrigatório, opcionais como `null`), `args` (Zod, a validação que vale), `label` (texto da atividade, em português) e `run`.
+2. Toda consulta filtra por `ctx.userId`. Use `ctx.db`, mantenha a ferramenta abaixo de 50 instruções D1 (o limite da invocação em que ela roda) e registre os itens retornados em `ctx.sources`.
 3. Escritas: crie `plan…`/`execute…` em `actions.ts` (validação + prévia, depois a gravação pelos serviços existentes) e chame `apply(ctx, plan, mode)` — ele decide entre executar e propor.
 4. Adicione ao array exportado do arquivo (já incluído em `TOOLS`) e um rótulo em `TOOL_NAMES` (`service.ts`). Mantenha menos de ~20 ferramentas: cada definição custa tokens em toda chamada.
 5. Teste com respostas simuladas em `apps/api/test/assistant.test.ts` (`callTools(...)`).
 
 ## Limites e decisões ligados ao plano gratuito
 
-- **50 consultas D1 por requisição (Workers Free).** As ferramentas recebem um D1 que conta cada instrução executada (contando cada instrução de um *batch*, de forma conservadora) e param em 30. O restante fica para autenticação, histórico e gravação. Por isso, confirmar uma estrutura roda numa requisição própria, sem nova chamada ao modelo, e as criações em lote usam uma instrução `INSERT … SELECT FROM json_each(?)`.
+- **50 consultas D1 por invocação (Workers Free).** Cada ferramenta roda numa invocação própria do Worker (`AssistantTools` em `entrypoint.ts`), então uma mensagem pode ler quantos assuntos e notas suas chamadas de ferramenta pedirem; a invocação do chat só gasta as consultas de autenticação, histórico e gravação. O teto passa a ser o de **32 invocações por requisição**: o chat mais até 30 ferramentas (`AI_MAX_TOOL_CALLS`). Mesmo assim, confirmar uma estrutura roda numa requisição própria, sem nova chamada ao modelo, e as criações em lote usam uma instrução `INSERT … SELECT FROM json_each(?)`.
 - **10 ms de CPU por requisição.** O cliente da OpenAI é um `fetch` enxuto (sem o SDK), e esperar a OpenAI não consome CPU. Montar o grafo (`find_connection_path`, mapa de assunto) é o passo mais pesado e já é o mesmo do grafo do app.
 - O D1 limita `SELECT`s compostos: a busca roda em dois grupos de tipos dentro de um batch.
 
@@ -183,6 +183,6 @@ A suíte normal nunca chama a OpenAI: a chave dos testes é falsa (`vitest.confi
 | “Muitas mensagens em pouco tempo” | `AI_MAX_REQUESTS_PER_MINUTE`. |
 | “O orçamento diário da IA exige os preços do modelo” | Faltam `AI_PRICE_INPUT_PER_MTOK`/`AI_PRICE_OUTPUT_PER_MTOK`. |
 | “A resposta excedeu o limite de tamanho” | Aumente `AI_MAX_OUTPUT_TOKENS` ou reduza `AI_REASONING_EFFORT`. |
-| Atividade mostra “limite da mensagem” | A mensagem pediu consultas demais para uma requisição; divida o pedido. |
+| Atividade mostra “limite de ferramentas” | A mensagem usou as `AI_MAX_TOOL_CALLS` chamadas (até 30); divida o pedido. |
 | `no such table: ai_messages` | Migração não aplicada: `npm run db:migrate:local` / `db:migrate:remote`. |
 | Detalhes de uma falha | Logs do Worker (`wrangler tail` ou painel): `openai request failed` traz status e código, nunca a chave. |

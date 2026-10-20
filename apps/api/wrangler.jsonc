@@ -46,8 +46,8 @@
     // none | low | medium | high — lower is cheaper (reasoning tokens are billed as output).
     "AI_REASONING_EFFORT": "low",
     "AI_MAX_OUTPUT_TOKENS": "2000",
-    // Tool calls the model may make in one chat turn.
-    "AI_MAX_TOOL_CALLS": "8",
+    // Tool calls the model may make in one chat turn (max 30: each runs in its own invocation, 32 per request).
+    "AI_MAX_TOOL_CALLS": "30",
     "AI_MAX_REQUESTS_PER_MINUTE": "6",
     // Requests are refused once today's recorded spend (UTC) reaches this amount.
     "AI_DAILY_BUDGET_USD": "0.50",

@@ -1,3 +1,4 @@
+import { exports } from 'cloudflare:workers';
 import {
   ENTITY_LABELS,
   SEARCH_ENTITY_TYPES,
@@ -23,7 +24,7 @@ import { createResponse, functionCalls, outputText, type FunctionCallItem, type 
 import { hasWriteIntent, systemInstructions } from './prompt';
 import { graphTools } from './tools/graph';
 import { readTools } from './tools/read';
-import { meteredDb, SourceCollector, truncate, type ToolContext, type ToolOutput } from './tools/types';
+import { SourceCollector, truncate, type SourceInfo, type ToolContext, type ToolOutput } from './tools/types';
 import { writeTools } from './tools/write';
 
 /** Explicit list of what the model may call. Nothing else is reachable (no SQL, no R2, no HTTP). */
@@ -40,16 +41,12 @@ const FUNCTION_TOOLS: FunctionTool[] = TOOLS.map((t) => ({
 /** Previous messages sent to the model, each cut to HISTORY_CHARS. */
 const HISTORY_MESSAGES = 12;
 const HISTORY_CHARS = 1500;
-/** Model calls per turn (each round may run several tools). */
-const MAX_ROUNDS = 6;
-const TOOL_OUTPUT_MAX = 16_000;
 /**
- * D1 statements tools may run in one chat request, counted as they run.
- * Workers Free allows 50 per invocation (counted conservatively: each
- * statement of a batch); the rest of the request (auth, idempotency,
- * limits, history, citations, saving) uses up to ~20.
+ * Model calls per turn (each round may run several tools). Each one is an
+ * external subrequest: Workers Free allows 50 per invocation.
  */
-const DB_BUDGET = 30;
+const MAX_ROUNDS = 16;
+const TOOL_OUTPUT_MAX = 16_000;
 /** A user message without an answer newer than this is still being processed. */
 const IN_FLIGHT_SECONDS = 180;
 const TURN_DEADLINE_MS = 100_000;
@@ -159,15 +156,6 @@ async function runTool(ctx: ToolContext, call: FunctionCallItem): Promise<ToolRu
     };
   }
   const label = tool.label(parsed.data);
-  if (ctx.dbBudget.used + tool.dbCost > ctx.dbBudget.limit) {
-    return {
-      output: {
-        error: 'request_limit',
-        message: 'Limite de consultas desta mensagem atingido. Responda com o que já foi obtido e sugira continuar numa próxima mensagem.',
-      },
-      activity: { tool: tool.name, label: `${label} (limite da mensagem)`, kind: tool.kind, ok: false },
-    };
-  }
   let output: ToolOutput;
   try {
     output = await tool.run(ctx, parsed.data);
@@ -192,6 +180,65 @@ async function runTool(ctx: ToolContext, call: FunctionCallItem): Promise<ToolRu
             : '';
   const prefix = tool.kind === 'read' ? '' : output.status === 'executed' ? 'Gravou: ' : output.status === 'awaiting_confirmation' ? 'Propôs: ' : '';
   return { output, activity: { tool: tool.name, label: `${prefix}${label}${suffix}`, kind: tool.kind, ok: !failed } };
+}
+
+/** What a turn keeps across its tools: everything in ToolContext except the database. */
+type TurnState = Omit<ToolContext, 'db'>;
+
+export interface IsolatedCall {
+  userId: string;
+  conversationId: string;
+  focus: AiContext | null;
+  writeIntent: boolean;
+  call: FunctionCallItem;
+}
+
+export interface IsolatedResult {
+  run: ToolRun;
+  /** Items the tool returned to the model and proposals or writes it made, merged into the turn. */
+  sources: SourceInfo[];
+  actions: AiAction[];
+}
+
+/** Runs one tool inside the AssistantTools entrypoint (see entrypoint.ts). */
+export async function runIsolatedTool(db: D1Database, input: IsolatedCall): Promise<IsolatedResult> {
+  const ctx: ToolContext = {
+    db,
+    userId: input.userId,
+    conversationId: input.conversationId,
+    focus: input.focus,
+    sources: new SourceCollector(),
+    actions: [],
+    writeIntent: input.writeIntent,
+  };
+  const run = await runTool(ctx, input.call);
+  return { run, sources: ctx.sources.list(), actions: ctx.actions };
+}
+
+/**
+ * Runs a tool in a new invocation of this Worker, which has its own D1 query
+ * limit (50 on Workers Free): a turn may read as much as its tool calls need,
+ * not just what fits in one request.
+ */
+async function dispatchTool(turn: TurnState, call: FunctionCallItem): Promise<ToolRun> {
+  try {
+    const res = (await exports.AssistantTools.run({
+      userId: turn.userId,
+      conversationId: turn.conversationId,
+      focus: turn.focus,
+      writeIntent: turn.writeIntent,
+      call,
+    })) as IsolatedResult;
+    for (const s of res.sources) turn.sources.add(s, s.depth);
+    turn.actions.push(...res.actions);
+    return res.run;
+  } catch (err) {
+    console.error(JSON.stringify({ level: 'error', msg: 'ai tool invocation failed', tool: call.name, error: err instanceof Error ? err.message.slice(0, 300) : String(err) }));
+    return {
+      output: { error: 'internal_error', message: 'Falha ao executar a ferramenta. Não repita esta chamada.' },
+      activity: { tool: call.name, label: `${TOOL_NAMES[call.name] ?? call.name} — falhou`, kind: TOOLS_BY_NAME.get(call.name)?.kind ?? 'read', ok: false },
+    };
+  }
 }
 
 const TOOL_NAMES: Record<string, string> = {
@@ -432,16 +479,13 @@ export async function chat(env: Env, userId: string, input: ChatInput): Promise<
   const inserted = await db.batch<Row>(userStatements);
   if (!inserted[inserted.length - 1]?.results?.length) throw new ApiError('conflict', 'Esta mensagem já foi enviada.');
 
-  const dbBudget = { used: 0, limit: DB_BUDGET };
-  const ctx: ToolContext = {
-    db: meteredDb(db, dbBudget),
+  const ctx: TurnState = {
     userId,
     conversationId,
     focus: input.context,
     sources: new SourceCollector(),
     actions: [],
     writeIntent: hasWriteIntent(input.message),
-    dbBudget,
   };
   if (input.context) ctx.sources.add({ type: input.context.type, id: input.context.id, title: focusTitle });
 
@@ -486,7 +530,7 @@ export async function chat(env: Env, userId: string, input: ChatInput): Promise<
           };
         } else {
           toolCalls++;
-          run = await runTool(ctx, call);
+          run = await dispatchTool(ctx, call);
         }
         activity.push(run.activity);
         items.push({ type: 'function_call_output', call_id: call.call_id, output: serialize(run.output) });
@@ -563,7 +607,7 @@ async function saveTurn(
   db: D1Database,
   cfg: AiConfig,
   t: TurnInfo,
-  ctx: ToolContext,
+  ctx: TurnState,
   r: { text: string; status: AiMessage['status']; usage: TokenUsage; calls: number; activity: AiToolActivity[]; usageRecorded?: boolean },
 ): Promise<AiChatResponse> {
   const { content, cited } = await verifyCitations(db, t.userId, r.text, ctx.sources);

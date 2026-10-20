@@ -104,7 +104,6 @@ export const createNoteTool = defineTool({
     mode: modeParam,
   }),
   args: zCreateNote,
-  dbCost: 14,
   label: (a) => `Nota ${q(a.title || 'Sem título')}`,
   async run(ctx, a) {
     const plan = await planCreateNote(ctx.db, ctx.userId, {
@@ -149,7 +148,6 @@ export const updateNoteTool = defineTool({
     mode: modeParam,
   }),
   args: zUpdateNote,
-  dbCost: 12,
   label: () => 'Edição de nota',
   async run(ctx, a) {
     const plan = await planUpdateNote(ctx.db, ctx.userId, {
@@ -201,7 +199,6 @@ export const createTopicsTool = defineTool({
     mode: modeParam,
   }),
   args: zCreateTopics,
-  dbCost: 5,
   label: (a) => (a.topics.length === 1 ? `Assunto ${q(a.topics[0]!.title)}` : `Estrutura de ${a.topics.length} assuntos`),
   async run(ctx, a) {
     const plan = await planCreateTopics(ctx.db, ctx.userId, {
@@ -234,7 +231,6 @@ export const updateTopicTool = defineTool({
     mode: modeParam,
   }),
   args: zUpdateTopic,
-  dbCost: 5,
   label: () => 'Edição de assunto',
   async run(ctx, a) {
     const plan = await planUpdateTopic(ctx.db, ctx.userId, {
@@ -262,7 +258,6 @@ export const moveTopicTool = defineTool({
     new_parent_id: S.nstr('New parent topic (null = root).'),
   }),
   args: zMoveTopic,
-  dbCost: 5,
   label: () => 'Mudança na hierarquia',
   async run(ctx, a) {
     const plan = await planMoveTopic(ctx.db, ctx.userId, { topicId: a.topic_id, baseVersion: a.base_version, parentId: a.new_parent_id });
@@ -310,7 +305,6 @@ export const createRelationsTool = defineTool({
     mode: modeParam,
   }),
   args: zCreateRelations,
-  dbCost: 10,
   label: (a) => (a.relations.length === 1 ? 'Relação no grafo' : `${a.relations.length} relações no grafo`),
   async run(ctx, a) {
     const plan = await planCreateRelations(ctx.db, ctx.userId, {
@@ -375,7 +369,6 @@ export const proposeMindMapTool = defineTool({
     links: S.arr(S.obj({ from_key: S.str(), to_key: S.str(), label: S.nstr() })),
   }),
   args: zMindMap,
-  dbCost: 7,
   label: (a) => `Mapa mental ${q(a.title)}`,
   async run(ctx, a) {
     for (const n of a.nodes) {
