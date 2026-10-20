@@ -111,6 +111,7 @@ export function Component() {
         targetSeconds: target ? Number(target) : null,
         themeWords: mode === 'explain' ? [topic?.title ?? ''] : [theme],
       };
+  setup.keepAudio = path.data?.settings.keepAudio ?? false;
   const ready = !!todays || mode === 'free' || !!topic;
   const chosenMethod = method ? SPEECH_METHODS[method] : todays && learned.length ? SPEECH_METHODS[learned.at(-1)!] : null;
 

@@ -34,7 +34,8 @@ export function createApp(modules: RouteModule[] = []): OpenAPIHono<AppEnv> {
 
   api.use('*', async (c, next) => {
     // Streaming uploads (whole file or one part) are bounded separately by the documents module.
-    if (c.req.method === 'PUT' && /\/(content|uploads\/parts\/\d+)$/.test(c.req.path)) return next();
+    // So is a kept speaking recording (bounded by the speech module).
+    if (c.req.method === 'PUT' && /\/(content|uploads\/parts\/\d+|speech\/attempts\/[0-9a-f-]{36}\/audio)$/.test(c.req.path)) return next();
     return bodyLimit({
       maxSize: JSON_BODY_LIMIT,
       onError: () => {

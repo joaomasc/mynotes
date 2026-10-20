@@ -57,6 +57,19 @@ curl https://mynotes-api.<subdomínio>.workers.dev/api/v1/health
 
 A documentação interativa da API fica em `/api/v1/docs` (OpenAPI em `/api/v1/openapi.json`).
 
+### Oratória: gravações, avaliação completa e lembretes
+
+As migrações `0005` a `0008` (oratória) só criam tabelas e colunas: aplique-as com `npm run db:migrate:remote` **antes** de publicar o Worker, como sempre. As gravações guardadas usam o mesmo bucket R2 dos documentos (prefixo `speech/`). A avaliação completa usa a mesma `OPENAI_API_KEY` (modelo em `AI_AUDIO_MODEL`, veja [ai.md](ai.md#configuração)).
+
+O lembrete diário (Web Push) precisa de um par de chaves VAPID, gerado uma vez:
+
+```bash
+npm run vapid -w @mynotes/api                 # imprime VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY
+npx wrangler secret put VAPID_PRIVATE_KEY     # cole a chave privada
+```
+
+e, em `apps/api/wrangler.jsonc`, nas `vars`: `"VAPID_PUBLIC_KEY": "<a chave pública>"` e `"VAPID_SUBJECT": "mailto:seu-email@exemplo.com"`. Sem as chaves, o resto da oratória funciona e a página de progresso avisa que os lembretes não estão configurados. Trocar as chaves invalida as inscrições: cada navegador precisa ativar o lembrete de novo.
+
 ### Pelo GitHub Actions (opcional)
 
 O workflow **Publicar API** (`.github/workflows/deploy-worker.yml`) é **manual**:

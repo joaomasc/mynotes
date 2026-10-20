@@ -18,6 +18,7 @@ import {
   type SpeechAttemptCreate,
   type SpeechAttemptSummary,
   type SpeechEvaluation,
+  type SpeechFullEvaluation,
   type SpeechMetrics,
   type SpeechMode,
   type SpeechTimeline,
@@ -63,11 +64,13 @@ function toSummary(r: Row): SpeechAttemptSummary {
     pvq: numOrNull(r.pvq),
     lessonId: strOrNull(r.lesson_id),
     parentId: strOrNull(r.parent_id),
+    projectId: strOrNull(r.project_id),
+    hasAudio: r.audio_key != null || num(r.has_audio) === 1,
     createdAt: str(r.created_at),
   };
 }
 
-function toAttempt(r: Row): SpeechAttempt {
+export function toAttempt(r: Row): SpeechAttempt {
   return {
     ...toSummary(r),
     transcript: str(r.transcript),
@@ -78,13 +81,14 @@ function toAttempt(r: Row): SpeechAttempt {
     measured: parseJson<CriterionResult[]>(r.measured_json, []),
     evaluation: parseJson<SpeechEvaluation | null>(r.evaluation_json, null),
     questions: parseJson<string[] | null>(r.questions_json, null),
+    fullEvaluation: parseJson<SpeechFullEvaluation | null>(r.full_evaluation_json, null),
     rubricVersion: num(r.rubric_version),
     version: num(r.version),
     updatedAt: str(r.updated_at),
   };
 }
 
-async function attemptRow(db: D1Database, userId: string, id: string): Promise<Row> {
+export async function attemptRow(db: D1Database, userId: string, id: string): Promise<Row> {
   const row = await first(db, 'SELECT * FROM speech_attempts WHERE id = ? AND user_id = ?', id, userId);
   if (!row) throw notFound('Fala');
   return row;
@@ -98,19 +102,23 @@ export async function getAttempt(db: D1Database, userId: string, id: string): Pr
 
 const SORT: SortSpec = { expr: 'started_at', field: 'started_at', dir: 'DESC' };
 const SUMMARY_COLUMNS =
-  'id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds, score, wpm, fillers_per_minute, pvq, lesson_id, parent_id, created_at, ' +
-  'CASE WHEN evaluation_json IS NULL THEN NULL ELSE 1 END AS evaluation_json';
+  'id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds, score, wpm, fillers_per_minute, pvq, lesson_id, parent_id, project_id, created_at, ' +
+  'CASE WHEN evaluation_json IS NULL THEN NULL ELSE 1 END AS evaluation_json, CASE WHEN audio_key IS NULL THEN 0 ELSE 1 END AS has_audio';
 
 export async function listAttempts(
   db: D1Database,
   userId: string,
-  q: { topicId?: string | undefined; cursor?: string | undefined; limit: number },
+  q: { topicId?: string | undefined; projectId?: string | undefined; cursor?: string | undefined; limit: number },
 ) {
   let where = 'user_id = ?';
   const binds: Bindable[] = [userId];
   if (q.topicId) {
     where += ' AND topic_id = ?';
     binds.push(q.topicId);
+  }
+  if (q.projectId) {
+    where += ' AND project_id = ?';
+    binds.push(q.projectId);
   }
   const page = keyset(SORT, q.cursor);
   const rows = await all(
@@ -144,6 +152,9 @@ export async function createAttempt(
   if (input.parentId && !(await first(db, 'SELECT 1 AS ok FROM speech_attempts WHERE id = ? AND user_id = ?', input.parentId, userId))) {
     throw badRequest('A fala de origem não existe');
   }
+  if (input.projectId && !(await first(db, 'SELECT 1 AS ok FROM speech_projects WHERE id = ? AND user_id = ?', input.projectId, userId))) {
+    throw badRequest('O discurso não existe');
+  }
   if (input.timeline.db.length !== input.timeline.f0.length) throw badRequest('Linha do tempo inconsistente');
 
   const settings = await speechSettings(db, userId);
@@ -153,8 +164,8 @@ export async function createAttempt(
     db,
     `INSERT INTO speech_attempts (id, user_id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds,
        transcript, words_json, segments_json, timeline_json, metrics_json, measured_json, evaluation_json, score,
-       rubric_version, wpm, fillers_per_minute, pvq, lesson_id, parent_id, version, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       rubric_version, wpm, fillers_per_minute, pvq, lesson_id, parent_id, project_id, version, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     input.id,
     userId,
     input.mode,
@@ -177,15 +188,19 @@ export async function createAttempt(
     input.metrics.pitch.pvq,
     input.lessonId,
     input.parentId,
+    input.projectId,
     now,
     now,
   );
   return { attempt: await getAttempt(db, userId, input.id), created: true };
 }
 
-export async function deleteAttempt(db: D1Database, userId: string, id: string): Promise<void> {
-  const res = await run(db, 'DELETE FROM speech_attempts WHERE id = ? AND user_id = ?', id, userId);
-  if (!res.meta.changes) throw notFound('Fala');
+export async function deleteAttempt(env: Env, userId: string, id: string): Promise<void> {
+  const row = await first<{ audio_key: string | null }>(env.DB, 'SELECT audio_key FROM speech_attempts WHERE id = ? AND user_id = ?', id, userId);
+  if (!row) throw notFound('Fala');
+  await run(env.DB, 'DELETE FROM speech_attempts WHERE id = ? AND user_id = ?', id, userId);
+  // The kept recording goes with the talk (it is not in any backup).
+  if (row.audio_key) await env.FILES.delete(row.audio_key);
 }
 
 /* --------------------------------------------------------- evaluation -- */
@@ -195,7 +210,7 @@ const NOTE_CHARS = 1500;
 const NOTES_TOTAL_CHARS = 9000;
 
 /** The user's notes on a topic and its subtopics, most recent first, bounded. */
-async function topicNotes(db: D1Database, userId: string, topicId: string): Promise<{ title: string; text: string }[]> {
+export async function topicNotes(db: D1Database, userId: string, topicId: string): Promise<{ title: string; text: string }[]> {
   const rows = await all<{ title: string; body_text: string }>(
     db,
     `WITH RECURSIVE tree(id) AS (
@@ -320,7 +335,7 @@ export async function evaluateAttempt(env: Env, userId: string, id: string, inpu
     throw new ApiError('service_unavailable', 'A avaliação da IA veio incompleta. Tente avaliar de novo.');
   }
   const evaluation = toEvaluation(answer, cfg.model, notes.length > 0);
-  const score = speechScore([...attempt.measured, ...evaluation.criteria], attempt.speechType);
+  const score = speechScore([...attempt.measured, ...evaluation.criteria, ...(attempt.fullEvaluation?.criteria ?? [])], attempt.speechType);
   const now = nowIso();
   await run(
     db,

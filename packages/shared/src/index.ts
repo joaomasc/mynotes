@@ -29,3 +29,5 @@ export * from './speech/content/topics';
 export * from './speech/content/level1';
 export * from './speech/content/level2';
 export * from './speech/content/level3';
+export * from './speech/project';
+export * from './schemas/speech-project';

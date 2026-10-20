@@ -8,6 +8,11 @@ import {
   zSpeechPracticeCreate,
   zSpeechPracticeResult,
   zSpeechQuestionsRequest,
+  zSpeechProject,
+  zSpeechProjectCreate,
+  zSpeechProjectUpdate,
+  zPushStatus,
+  zPushSubscription,
   zSpeechVariantsQuery,
   zVariantExercise,
   zPageQuery,
@@ -19,7 +24,10 @@ import {
 } from '@mynotes/shared';
 import type { ApiApp } from '../../app';
 import { errors, idParam, jsonBody, noContent, ok, okPage, secured } from '../../lib/openapi';
+import { fullEvaluation, serveAudio, uploadAudio } from './audio';
 import { pathState, recordPractice } from './path';
+import * as projects from './projects';
+import { pushStatus, sendTest, subscribe, unsubscribe } from './push';
 import { serveVariants } from './variants';
 import * as speech from './service';
 
@@ -85,7 +93,7 @@ export function speechRoutes(app: ApiApp) {
       responses: { 204: noContent, ...errors },
     }),
     async (c) => {
-      await speech.deleteAttempt(c.env.DB, c.get('userId'), c.req.valid('param').id);
+      await speech.deleteAttempt(c.env, c.get('userId'), c.req.valid('param').id);
       return c.body(null, 204);
     },
   );
@@ -178,5 +186,174 @@ export function speechRoutes(app: ApiApp) {
       responses: { 200: ok(z.array(zVariantExercise)), ...errors },
     }),
     async (c) => c.json({ data: await serveVariants(c.env, c.get('userId'), c.req.valid('query').skill) }, 200),
+  );
+
+  /* -------------------------------------------------- kept recordings -- */
+
+  const binary = z.string().openapi({ type: 'string', format: 'binary' });
+
+  app.openapi(
+    createRoute({
+      method: 'put',
+      path: '/speech/attempts/{id}/audio',
+      tags,
+      summary: 'Guardar a gravação da fala (WAV mono de 8 kHz, streaming para o R2)',
+      description: 'Exige Content-Length. A gravação não entra no backup e é apagada com a fala.',
+      security: secured,
+      request: { params: idParam, body: { content: { 'audio/wav': { schema: binary } } } },
+      responses: { 200: ok(zSpeechAttempt), 413: errors[400], 415: errors[400], ...errors },
+    }),
+    async (c) => c.json({ data: await uploadAudio(c.env, c.get('userId'), c.req.valid('param').id, c.req.raw) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/speech/attempts/{id}/audio',
+      tags,
+      summary: 'Ouvir a gravação guardada',
+      security: secured,
+      request: { params: idParam },
+      responses: { 200: { content: { 'audio/wav': { schema: binary } }, description: 'Gravação' }, ...errors },
+    }),
+    async (c) => serveAudio(c.env, c.get('userId'), c.req.valid('param').id),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/attempts/{id}/full-evaluation',
+      tags,
+      summary: 'Avaliação completa: a IA ouve a gravação (abertura e conclusão) e julga a presença e a voz',
+      description: 'Exige a gravação guardada. Usa o modelo de áudio da OpenAI (AI_AUDIO_MODEL) e conta no orçamento diário.',
+      security: secured,
+      request: { params: idParam, body: jsonBody(zSpeechEvaluate) },
+      responses: { 200: ok(zSpeechAttempt), ...errors },
+    }),
+    async (c) => c.json({ data: await fullEvaluation(c.env, c.get('userId'), c.req.valid('param').id, c.req.valid('json')) }, 200),
+  );
+
+  /* --------------------------------------------------------- projects -- */
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/speech/projects',
+      tags,
+      summary: 'Seus discursos (nível 4)',
+      security: secured,
+      responses: { 200: ok(z.array(zSpeechProject)), ...errors },
+    }),
+    async (c) => c.json({ data: await projects.listProjects(c.env.DB, c.get('userId')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/projects',
+      tags,
+      summary: 'Começar um discurso',
+      security: secured,
+      request: { body: jsonBody(zSpeechProjectCreate) },
+      responses: { 201: ok(zSpeechProject, 'Criado'), 200: ok(zSpeechProject, 'Já existia'), ...errors },
+    }),
+    async (c) => {
+      const { project, created } = await projects.createProject(c.env.DB, c.get('userId'), c.req.valid('json'));
+      return created ? c.json({ data: project }, 201) : c.json({ data: project }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/speech/projects/{id}',
+      tags,
+      summary: 'Obter um discurso',
+      security: secured,
+      request: { params: idParam },
+      responses: { 200: ok(zSpeechProject), ...errors },
+    }),
+    async (c) => c.json({ data: await projects.getProject(c.env.DB, c.get('userId'), c.req.valid('param').id) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'patch',
+      path: '/speech/projects/{id}',
+      tags,
+      summary: 'Editar um discurso (com a versão vista, para não sobrescrever outro aparelho)',
+      security: secured,
+      request: { params: idParam, body: jsonBody(zSpeechProjectUpdate) },
+      responses: { 200: ok(zSpeechProject), ...errors },
+    }),
+    async (c) => c.json({ data: await projects.updateProject(c.env.DB, c.get('userId'), c.req.valid('param').id, c.req.valid('json')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'delete',
+      path: '/speech/projects/{id}',
+      tags,
+      summary: 'Excluir um discurso (os ensaios e a nota continuam)',
+      security: secured,
+      request: { params: idParam },
+      responses: { 204: noContent, ...errors },
+    }),
+    async (c) => {
+      await projects.deleteProject(c.env.DB, c.get('userId'), c.req.valid('param').id);
+      return c.body(null, 204);
+    },
+  );
+
+  /* -------------------------------------------------------- reminders -- */
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/speech/push',
+      tags,
+      summary: 'Lembretes: chave pública do servidor e quantos navegadores estão inscritos',
+      security: secured,
+      responses: { 200: ok(zPushStatus), ...errors },
+    }),
+    async (c) => c.json({ data: await pushStatus(c.env, c.get('userId')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/push/subscriptions',
+      tags,
+      summary: 'Inscrever este navegador nos lembretes',
+      security: secured,
+      request: { body: jsonBody(zPushSubscription) },
+      responses: { 200: ok(zPushStatus), ...errors },
+    }),
+    async (c) => c.json({ data: await subscribe(c.env, c.get('userId'), c.req.valid('json')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/push/unsubscribe',
+      tags,
+      summary: 'Cancelar os lembretes deste navegador',
+      security: secured,
+      request: { body: jsonBody(z.object({ endpoint: z.string().max(2000) })) },
+      responses: { 200: ok(zPushStatus), ...errors },
+    }),
+    async (c) => c.json({ data: await unsubscribe(c.env, c.get('userId'), c.req.valid('json').endpoint) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/push/test',
+      tags,
+      summary: 'Enviar um lembrete de teste para os seus navegadores',
+      security: secured,
+      responses: { 200: ok(z.object({ sent: z.number().int() })), ...errors },
+    }),
+    async (c) => c.json({ data: await sendTest(c.env, c.get('userId')) }, 200),
   );
 }

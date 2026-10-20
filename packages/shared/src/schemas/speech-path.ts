@@ -15,6 +15,17 @@ export const zSpeechSettings = z.object({
       finalDropDb: z.number().min(2).max(15).nullable().default(null),
     })
     .default({ paceMin: null, paceMax: null, pvqGood: null, finalDropDb: null }),
+  /** Keep the recording of every talk (to listen again and for the full evaluation). */
+  keepAudio: z.boolean().default(false),
+  /** Daily reminder (Web Push) at a local time, when the day has no practice yet. */
+  reminder: z
+    .object({
+      enabled: z.boolean().default(false),
+      time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Horário inválido').default('19:00'),
+      /** Minutes east of UTC of the device that set it (Brasília: -180). */
+      tzOffsetMinutes: z.number().int().min(-840).max(840).default(-180),
+    })
+    .default({ enabled: false, time: '19:00', tzOffsetMinutes: -180 }),
 });
 export type SpeechSettings = z.infer<typeof zSpeechSettings>;
 

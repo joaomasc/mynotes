@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, type RefObject } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ArrowDown, Dumbbell, Ellipsis, Gavel, Mic, RefreshCw, Sparkles, Trash } from 'lucide-react';
+import { ArrowDown, Columns2, Dumbbell, Ellipsis, Gavel, Headphones, Mic, RefreshCw, Sparkles, Trash } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   CRITERIA_INFO,
@@ -72,7 +72,84 @@ function criteriaOf(a: SpeechAttempt, dim: SpeechDimension): CriterionResult[] {
       original: null,
       rewrite: null,
     }));
-  return [...a.measured, ...text].filter((c) => CRITERIA_INFO[c.id].dimension === dim);
+  return [...a.measured, ...text, ...(a.fullEvaluation?.criteria ?? [])].filter((c) => CRITERIA_INFO[c.id].dimension === dim);
+}
+
+/** The kept recording, fetched with the session (an <audio> cannot send the token). */
+function AudioPlayer({ id, audioRef }: { id: string; audioRef: RefObject<HTMLAudioElement | null> }) {
+  const blob = useQuery({ queryKey: ['speech-audio', id], queryFn: () => endpoints.speech.audio(id), staleTime: Infinity, gcTime: 60_000 });
+  const url = useMemo(() => (blob.data ? URL.createObjectURL(blob.data) : null), [blob.data]);
+  useEffect(() => () => void (url && URL.revokeObjectURL(url)), [url]);
+  if (blob.isError) return <p className="text-sm text-muted">Não foi possível carregar a gravação.</p>;
+  if (!url) return <Spinner className="size-4" label="Carregando a gravação" />;
+  return <audio ref={audioRef} src={url} controls className="w-full" preload="metadata" />;
+}
+
+/** A model listening to the recording: presence and the voice itself. */
+function FullEvaluationCard({ attempt, aiReady }: { attempt: SpeechAttempt; aiReady: boolean }) {
+  const qc = useQueryClient();
+  const run = useMutation({
+    mutationFn: (force: boolean) => endpoints.speech.fullEvaluation(attempt.id, force),
+    onSuccess: (a) => {
+      qc.setQueryData(qk.speechAttempt(a.id), a);
+      void qc.invalidateQueries({ queryKey: qk.speechAttempts });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const f = attempt.fullEvaluation;
+  return (
+    <Section title="Avaliação completa (IA ouvindo)">
+      <Card className="space-y-3 p-4 text-sm">
+        {run.isPending ? (
+          <p className="flex items-center gap-2 text-muted">
+            <Spinner className="size-4" label="Ouvindo" /> O professor está ouvindo a sua fala…
+          </p>
+        ) : f ? (
+          <>
+            <p>{f.summary}</p>
+            {f.remarks.length > 0 && (
+              <ul className="list-disc space-y-1 pl-5 text-muted">
+                {f.remarks.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-subtle">
+                Ouviu {Math.round(f.heardSeconds)} s{f.heardSeconds < attempt.durationSeconds - 2 ? ' (abertura e conclusão)' : ''}. Os critérios de presença estão abaixo.
+              </p>
+              {aiReady && (
+                <Button size="sm" variant="ghost" icon={<RefreshCw className="size-4" />} onClick={() => run.mutate(true)}>
+                  Ouvir de novo
+                </Button>
+              )}
+            </div>
+          </>
+        ) : attempt.hasAudio ? (
+          <>
+            <p className="text-muted">
+              A IA ouve a abertura e a conclusão (até 90 s) e julga segurança, naturalidade, ênfase, energia e estabilidade da voz. Custa alguns centavos de dólar e conta no orçamento diário.
+            </p>
+            {aiReady ? (
+              <Button size="sm" variant="primary" icon={<Headphones className="size-4" />} onClick={() => run.mutate(false)}>
+                Pedir a avaliação completa
+              </Button>
+            ) : (
+              <p className="text-xs text-subtle">O assistente de IA não está configurado nesta instalação.</p>
+            )}
+          </>
+        ) : (
+          <p className="text-muted">
+            A presença (segurança, naturalidade, ênfase, energia) só se avalia ouvindo. Ative “Guardar a gravação das falas” em{' '}
+            <Link to="/speaking/progress" className="text-accent hover:underline">
+              Progresso
+            </Link>{' '}
+            e grave de novo.
+          </p>
+        )}
+      </Card>
+    </Section>
+  );
 }
 
 function CriterionRow({ c }: { c: CriterionResult }) {
@@ -105,6 +182,7 @@ export function Component() {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const { tree } = useTopics();
+  const audioRef = useRef<HTMLAudioElement>(null);
   const query = useQuery({ queryKey: qk.speechAttempt(id), queryFn: () => endpoints.speech.get(id) });
   const ai = useQuery({ queryKey: qk.aiStatus, queryFn: endpoints.ai.status, staleTime: 60_000 });
   const evaluate = useMutation({
@@ -173,6 +251,7 @@ export function Component() {
                 ...(attempt.evaluated && aiReady
                   ? [{ label: 'Avaliar de novo com a IA', icon: <RefreshCw />, onSelect: () => evaluate.mutate(true) }]
                   : []),
+                { label: 'Comparar com outra fala', icon: <Columns2 />, onSelect: () => void navigate(`/speaking/compare?a=${attempt.id}`) },
                 { label: 'Excluir', icon: <Trash />, danger: true, onSelect: () => void remove() },
               ]}
             />
@@ -245,7 +324,7 @@ export function Component() {
           </Section>
         )}
 
-        {(['content', 'language', 'voice'] as const).map((dim) => (
+        {(attempt.fullEvaluation ? (['content', 'language', 'voice', 'presence'] as const) : (['content', 'language', 'voice'] as const)).map((dim) => (
           <Section key={dim} title={DIMENSION_LABELS[dim]}>
             <Card className="divide-y divide-border">
               {criteriaOf(attempt, dim).map((c) => (
@@ -254,9 +333,7 @@ export function Component() {
             </Card>
           </Section>
         ))}
-        <p className="-mt-4 text-xs text-subtle">
-          {DIMENSION_LABELS.presence} (segurança, naturalidade, ênfase, energia) depende de uma IA que ouça o áudio e chega numa próxima etapa.
-        </p>
+        <FullEvaluationCard attempt={attempt} aiReady={aiReady} />
 
         <Section title="Tom e volume ao longo da fala">
           <Card className="p-4">
@@ -265,8 +342,23 @@ export function Component() {
         </Section>
 
         <Section title="Transcrição">
-          <Card className="p-4">
-            <MarkedTranscript words={attempt.words} marks={attempt.metrics.marks} transcript={attempt.transcript} />
+          <Card className="space-y-3 p-4">
+            {attempt.hasAudio && <AudioPlayer id={attempt.id} audioRef={audioRef} />}
+            <MarkedTranscript
+              words={attempt.words}
+              marks={attempt.metrics.marks}
+              transcript={attempt.transcript}
+              onSeek={
+                attempt.hasAudio
+                  ? (t) => {
+                      const audio = audioRef.current;
+                      if (!audio) return;
+                      audio.currentTime = Math.max(0, t - 0.3);
+                      void audio.play();
+                    }
+                  : undefined
+              }
+            />
           </Card>
         </Section>
       </div>

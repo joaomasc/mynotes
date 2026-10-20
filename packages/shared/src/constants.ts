@@ -236,3 +236,8 @@ export const SPEECH_MAX_SECONDS = 15 * 60;
 export const SPEECH_FRAME_SECONDS = 0.02;
 /** Resolution of the loudness/pitch timeline kept with a talk (charts). */
 export const SPEECH_TIMELINE_STEP = 0.1;
+/** Kept recordings: 8 kHz mono 16-bit WAV (playback and the full evaluation). */
+export const SPEECH_AUDIO_RATE = 8_000;
+export const SPEECH_AUDIO_MAX_BYTES = 44 + (SPEECH_MAX_SECONDS + 30) * SPEECH_AUDIO_RATE * 2;
+/** The full evaluation hears the opening and the closing: this many seconds of each. */
+export const SPEECH_EXCERPT_SECONDS = 45;

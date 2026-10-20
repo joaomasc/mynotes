@@ -120,6 +120,10 @@ O texto dos PDFs **não é extraído nem indexado** (o leitor usa pdf.js no nave
 | `AI_WEB_SEARCH` | `vars` | `true` | `false` desliga a pesquisa na web (o globo some). |
 | `AI_MAX_WEB_SEARCHES` | `vars` | `5` | Buscas na web por mensagem (1 a 10). |
 | `AI_PRICE_WEB_SEARCH_PER_CALL` | `vars` | `0.01` | US$ por busca, somado ao custo e ao orçamento. Inválido ou ausente → `0.01` (nunca grátis). |
+| `AI_AUDIO_MODEL` | `vars` | `gpt-audio` | Modelo que ouve as gravações na avaliação completa da oratória (Chat Completions, `input_audio` em WAV). |
+| `AI_PRICE_AUDIO_INPUT_PER_MTOK` | `vars` | `32` | US$ por 1M tokens de áudio de entrada. Ausente → o preço publicado (nunca grátis). |
+| `AI_PRICE_AUDIO_TEXT_INPUT_PER_MTOK` | `vars` | `2.5` | US$ por 1M tokens de texto de entrada do modelo de áudio. |
+| `AI_PRICE_AUDIO_TEXT_OUTPUT_PER_MTOK` | `vars` | `10` | US$ por 1M tokens de texto de saída do modelo de áudio. |
 
 Valores inválidos caem nos padrões seguros (nunca em “ilimitado”). Os preços padrão são os da [tabela oficial](https://developers.openai.com/api/docs/pricing) para `gpt-6-luna` (Standard), conferidos em 20/10/2026. **Ao trocar o modelo, atualize os preços.**
 

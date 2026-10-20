@@ -439,7 +439,7 @@ export function TalkCard({
   const asked = useRef<string | null>(null);
   const resolved = resolveTopic(spec.topic, state);
   const text = resolved.text;
-  const setup = { ...resolved.setup, ...setupOverride };
+  const setup = { ...resolved.setup, keepAudio: state?.settings.keepAudio ?? false, ...setupOverride };
   const method = spec.method && spec.method in SPEECH_METHODS ? SPEECH_METHODS[spec.method as keyof typeof SPEECH_METHODS] : null;
 
   useEffect(() => {

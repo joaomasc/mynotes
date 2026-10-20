@@ -60,6 +60,11 @@ import type {
   SpeechPathState,
   SpeechPracticeCreate,
   SpeechPracticeResult,
+  SpeechProject,
+  SpeechProjectCreate,
+  SpeechProjectUpdate,
+  PushStatus,
+  PushSubscriptionInput,
   SkillId,
   VariantExercise,
   StudySession,
@@ -84,7 +89,7 @@ import type {
   ViewLayout,
   ViewLayoutData,
 } from '@mynotes/shared';
-import { api } from './client';
+import { api, request } from './client';
 import { postStream } from './sse';
 
 /** Every API call used by the app, typed with the shared contract. */
@@ -269,6 +274,22 @@ export const endpoints = {
     feedback: (body: SpeechFeedbackRequest) => api.post<SpeechFeedback>('/speech/feedback', body, { retries: 0, track: false }),
     questions: (id: string, force = false) => api.post<SpeechAttempt>(`/speech/attempts/${id}/questions`, { force }, { retries: 0, track: false }),
     variants: (skill: SkillId) => api.get<VariantExercise[]>('/speech/variants', { skill }),
+    uploadAudio: async (id: string, wav: Uint8Array<ArrayBuffer>) => {
+      const res = await request('PUT', `/speech/attempts/${id}/audio`, { rawBody: new Blob([wav], { type: 'audio/wav' }), headers: { 'Content-Type': 'audio/wav' }, retries: 0 });
+      return ((await res.json()) as { data: SpeechAttempt }).data;
+    },
+    audio: (id: string) => api.blob(`/speech/attempts/${id}/audio`),
+    fullEvaluation: (id: string, force = false) =>
+      api.post<SpeechAttempt>(`/speech/attempts/${id}/full-evaluation`, { force }, { retries: 0, track: false }),
+    projects: () => api.get<SpeechProject[]>('/speech/projects'),
+    project: (id: string) => api.get<SpeechProject>(`/speech/projects/${id}`),
+    createProject: (body: SpeechProjectCreate) => api.post<SpeechProject>('/speech/projects', body),
+    updateProject: (id: string, body: SpeechProjectUpdate) => api.patch<SpeechProject>(`/speech/projects/${id}`, body, { retries: 0 }),
+    removeProject: (id: string) => api.del(`/speech/projects/${id}`),
+    pushStatus: () => api.get<PushStatus>('/speech/push'),
+    subscribePush: (body: PushSubscriptionInput) => api.post<PushStatus>('/speech/push/subscriptions', body),
+    unsubscribePush: (endpoint: string) => api.post<PushStatus>('/speech/push/unsubscribe', { endpoint }),
+    testPush: () => api.post<{ sent: number }>('/speech/push/test'),
   },
 
   transcriptions: {

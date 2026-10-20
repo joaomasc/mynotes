@@ -102,6 +102,8 @@ export default defineConfig(({ mode }) => {
             },
           ],
           cleanupOutdatedCaches: true,
+          // Web Push handler of the speaking reminder (public/push-sw.js).
+          importScripts: ['push-sw.js'],
         },
       }),
     ],

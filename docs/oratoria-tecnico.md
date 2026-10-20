@@ -298,7 +298,7 @@ No **painel inicial**, um cartão “Oratória” mostra a sequência de dias e 
 | **1. Motor de análise** ✓ | Gravador com opções de captura e fila em IndexedDB; Analisador acústico; transcrição com `detail: "words"`; métricas; régua como dados; tela de resultado; fala livre e “explicar um assunto”; avaliação de texto pela IA; histórico | Uma fala de 2 minutos gera resultado completo e explicado; as gravações de calibração apontam os problemas certos |
 | **2. Calibração e nível 1** ✓ | Linha de base (unidade 1) e ajuste dos limites; conteúdo do nível 1; player de lições com todos os tipos de exercício; XP, meta diária e sequência de dias; aquecimento e Discurso do Dia; cartão no painel | Dá para fazer a sessão diária completa do nível 1 no celular |
 | **3. Níveis 2 e 3** ✓ | Conteúdo; biblioteca de métodos; banca de perguntas; níveis de habilidade e lições de revisão; variações geradas pela IA; desafios de nível | A trilha até a unidade 16 funciona com revisões automáticas |
-| **4. Discurso próprio** | Nível 4 com projetos ligados a notas; ensaios comparados; avaliação completa com áudio; guardar áudio; lembrete por Web Push | Um discurso vai da ideia à apresentação final dentro do app |
+| **4. Discurso próprio** ✓ | Nível 4 com projetos ligados a notas; ensaios comparados; avaliação completa com áudio; guardar áudio; lembrete por Web Push | Um discurso vai da ideia à apresentação final dentro do app |
 
 A etapa 1 já é útil sozinha (treino livre com retorno detalhado) e valida a parte mais arriscada, as medições, antes de escrever o conteúdo da trilha.
 
@@ -336,3 +336,12 @@ A etapa 1 já é útil sozinha (treino livre com retorno detalhado) e valida a p
 - **Variações da IA nas revisões:** a lição de revisão espera até 3 exercícios extras da habilidade antes de começar; sem IA, segue só com os exercícios da trilha. Itens inválidos do modelo são descartados (`toVariants`).
 - **Biblioteca de métodos** em `/speaking/methods`, mostrando quais já foram aprendidos.
 - Migração `0007_speech_board.sql`: colunas `parent_id` e `questions_json` em `speech_attempts` e a tabela `speech_exercise_variants` (fora do backup, por ser regenerável).
+
+**Etapa 4 entregue** (`/speaking/projects/:id`, `/speaking/compare`):
+
+- **Seu discurso:** projetos (`speech_projects`) com as 11 etapas de `speech/project.ts`. As etapas escritas salvam sozinhas (com a versão vista, como as notas) e pedem o comentário do professor; os ensaios e a apresentação final são falas com `project_id`, sempre com a gravação guardada; a revisão mostra os pontos do primeiro ensaio; a banca abre sobre o segundo ensaio. O roteiro vira uma nota (Markdown → editor) no assunto do projeto, criada ou atualizada pelo botão “Salvar como nota”.
+- **Comparação lado a lado** de duas falas quaisquer: nota, medidas e todos os critérios, com setas de melhora e piora.
+- **Guardar a gravação:** configuração “Guardar a gravação das falas” (e sempre nos ensaios). O navegador reduz o áudio para 8 kHz durante a fala e, depois de salvá-la, envia um WAV mono de 16 bits (cerca de 1 MB por minuto) em streaming para o R2 (`PUT speech/attempts/{id}/audio`). A gravação toca no resultado, e tocar numa palavra da transcrição pula para aquele momento. Não entra no backup e é apagada com a fala.
+- **Avaliação completa:** a Responses API não aceita áudio; o modelo `gpt-audio` (US$ 32 por milhão de tokens de áudio, conferido em 2026-10-20) é chamado por Chat Completions (`createChatCompletion`), com `input_audio` em WAV. Ele ouve os primeiros e os últimos 45 s (até 90 s no total, cerca de 1,4 MB) e julga estabilidade, segurança, naturalidade, ênfase e energia. O custo entra no orçamento diário pelos preços de áudio (`AI_PRICE_AUDIO_*`). Na apresentação final do discurso, a avaliação completa é pedida sozinha.
+- **Lembrete diário por Web Push**, sem serviço de terceiros: criptografia aes128gcm (RFC 8291) e assinatura VAPID (RFC 8292) feitas com WebCrypto no Worker (`push.ts`), assinaturas em `speech_push_subscriptions`, envio pelo cron de 10 minutos após o horário escolhido, só nos dias sem prática e uma vez por dia por navegador. O service worker recebe com `public/push-sw.js`. Exige as chaves VAPID (veja [deploy.md](deploy.md#oratória-gravações-avaliação-completa-e-lembretes)).
+- Migração `0008_speech_projects_audio.sql`.

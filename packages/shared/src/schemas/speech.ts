@@ -116,6 +116,19 @@ export const zSpeechEvaluation = z.object({
 });
 export type SpeechEvaluation = z.infer<typeof zSpeechEvaluation>;
 
+/** A model listening to the recording: presence and the voice itself. */
+export const zSpeechFullEvaluation = z.object({
+  criteria: z.array(zCriterionResult).max(10),
+  /** Remarks about the voice, each pointing to a moment when possible. */
+  remarks: z.array(z.string().max(500)).max(5),
+  summary: z.string().max(2000),
+  /** Seconds heard (the opening and the closing of long talks). */
+  heardSeconds: z.number().min(0),
+  model: z.string().max(100),
+  evaluatedAt: zDateTime,
+});
+export type SpeechFullEvaluation = z.infer<typeof zSpeechFullEvaluation>;
+
 export const zSpeechAttemptCreate = z.object({
   /** Client-generated (UUID v7), so a retried save never duplicates the talk. */
   id: zId,
@@ -127,6 +140,8 @@ export const zSpeechAttemptCreate = z.object({
   lessonId: z.string().max(64).nullable().default(null),
   /** For an answer to the board: the talk the question was about. */
   parentId: zId.nullable().default(null),
+  /** A rehearsal of one of the user's own speeches (level 4). */
+  projectId: zId.nullable().default(null),
   startedAt: zDateTime,
   /** Calendar day in the user's time zone (streaks are counted on it). */
   localDay: zDate,
@@ -154,6 +169,9 @@ export const zSpeechAttemptSummary = z.object({
   pvq: z.number().nullable(),
   lessonId: z.string().nullable(),
   parentId: zId.nullable(),
+  projectId: zId.nullable(),
+  /** The recording was kept (listen again, full evaluation). */
+  hasAudio: z.boolean(),
   createdAt: zDateTime,
 });
 export type SpeechAttemptSummary = z.infer<typeof zSpeechAttemptSummary>;
@@ -169,6 +187,7 @@ export const zSpeechAttempt = zSpeechAttemptSummary.extend({
   evaluation: zSpeechEvaluation.nullable(),
   /** Questions the board asked about this talk. */
   questions: z.array(z.string()).nullable(),
+  fullEvaluation: zSpeechFullEvaluation.nullable(),
   rubricVersion: z.number().int(),
   version: zVersion,
   updatedAt: zDateTime,
@@ -181,7 +200,7 @@ export const zSpeechEvaluate = z.object({
 });
 export type SpeechEvaluate = z.infer<typeof zSpeechEvaluate>;
 
-export const zSpeechListQuery = z.object({ topicId: zId.optional() });
+export const zSpeechListQuery = z.object({ topicId: zId.optional(), projectId: zId.optional() });
 
 export const zSpeechQuestionsRequest = z.object({
   /** Ask new questions even if the board already asked some. */

@@ -334,3 +334,68 @@ export function outputText(output: OutputItem[]): string {
   }
   return parts.join('\n').trim();
 }
+
+/* ------------------------------------------------- chat completions -- */
+
+/** Usage of a Chat Completions call, with the audio part of the prompt apart (priced differently). */
+export interface ChatUsage {
+  promptTokens: number;
+  audioTokens: number;
+  completionTokens: number;
+}
+
+/**
+ * One Chat Completions request (POST /v1/chat/completions), used only where
+ * the Responses API does not reach: models that listen to audio. Text out,
+ * nothing stored at OpenAI; one retry when the request certainly did not run.
+ */
+export async function createChatCompletion(
+  cfg: AiConfig & { apiKey: string },
+  body: { model: string; messages: Record<string, unknown>[]; maxTokens: number; timeoutMs?: number },
+): Promise<{ text: string; finishReason: string; usage: ChatUsage }> {
+  const payload = JSON.stringify({
+    model: body.model,
+    modalities: ['text'],
+    messages: body.messages,
+    max_completion_tokens: body.maxTokens,
+    store: false,
+  });
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
+        body: payload,
+        signal: AbortSignal.timeout(body.timeoutMs ?? cfg.timeoutMs),
+      });
+    } catch (err) {
+      const timeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      logFailure(timeout ? 'timeout' : 'network', 0, '', err instanceof Error ? err.message : String(err));
+      throw new ApiError('service_unavailable', timeout ? 'A OpenAI demorou demais para responder. Tente de novo.' : 'Não foi possível conectar à OpenAI agora.');
+    }
+    if (res.ok) {
+      const data = (await res.json()) as {
+        choices?: { message?: { content?: string | null }; finish_reason?: string }[];
+        usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { audio_tokens?: number } };
+      };
+      const choice = data.choices?.[0];
+      return {
+        text: choice?.message?.content ?? '',
+        finishReason: choice?.finish_reason ?? 'stop',
+        usage: {
+          promptTokens: data.usage?.prompt_tokens ?? 0,
+          audioTokens: data.usage?.prompt_tokens_details?.audio_tokens ?? 0,
+          completionTokens: data.usage?.completion_tokens ?? 0,
+        },
+      };
+    }
+    const errBody = (await res.json().catch(() => null)) as { error?: { code?: string; type?: string; message?: string } } | null;
+    const quota = /insufficient_quota|billing/i.test(`${errBody?.error?.code ?? ''} ${errBody?.error?.type ?? ''}`);
+    if ((res.status >= 500 || (res.status === 429 && !quota)) && attempt === 0) {
+      await sleep(800);
+      continue;
+    }
+    throw toApiError(res.status, errBody, body.model);
+  }
+}

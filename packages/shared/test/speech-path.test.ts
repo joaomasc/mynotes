@@ -195,3 +195,32 @@ describe('goals and calibration', () => {
     }
   });
 });
+
+describe('your own speech (level 4)', () => {
+  it('turns what was written into a script, skipping empty parts', async () => {
+    const { projectScript, stepFilled, zProjectData, PROJECT_STEPS, markdownToDoc } = await import('../src');
+    const data = zProjectData.parse({
+      audience: 'Moradores do bairro',
+      centralIdea: 'A ciclovia salva vidas.',
+      method: 'monroe',
+      points: [{ title: 'Segurança', argument: 'Menos acidentes.', evidence: '40% a menos em Curitiba.' }],
+      conclusion: 'Ou seja: pedalar não pode custar a vida.',
+      callToAction: 'Venha à audiência de terça.',
+    });
+    const script = projectScript('Ciclovia na avenida', 'political', data);
+    expect(script).toContain('# Ciclovia na avenida');
+    expect(script).toContain('**Público:** Moradores do bairro');
+    expect(script).toContain('## Desenvolvimento (Sequência de Monroe)');
+    expect(script).toContain('*Evidência:* 40% a menos em Curitiba.');
+    expect(script).toContain('**Chamado à ação:** Venha à audiência de terça.');
+    expect(script).not.toContain('## História');
+    expect(script).not.toContain('Objetivo');
+    expect(markdownToDoc(script).content[0]).toMatchObject({ type: 'heading' });
+
+    const step = (id: string) => PROJECT_STEPS.find((s) => s.id === id)!;
+    expect(stepFilled(step('centralIdea'), data)).toBe(true);
+    expect(stepFilled(step('story'), data)).toBe(false);
+    expect(stepFilled(step('arguments'), data)).toBe(true);
+    expect(PROJECT_STEPS.map((s) => s.number)).toEqual(Array.from({ length: 11 }, (_, i) => i + 1));
+  });
+});

@@ -8,9 +8,11 @@ import { toast } from 'sonner';
 import { DEFAULT_SPEECH_LIMITS, SKILL_LABELS, SPEECH_SKILLS, calibratedLimits, type SpeechSettings } from '@mynotes/shared';
 import { Button } from '@/components/ui/button';
 import { ErrorState, PageLoader } from '@/components/ui/feedback';
-import { Field, Input, Segmented } from '@/components/ui/form';
+import { Checkbox, Field, Input, Segmented } from '@/components/ui/form';
 import { Card, Page, PageHeader, Section } from '@/components/ui/layout';
+import { errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
+import { disablePush, enablePush } from '@/lib/push';
 import { cn } from '@/lib/cn';
 import { qk } from '@/lib/query';
 import { useUpdateSetting } from '../settings/use-settings';
@@ -54,6 +56,7 @@ function Calibration({ settings, talks }: { settings: SpeechSettings; talks: { w
   };
   const save = () => {
     const value: SpeechSettings = {
+      ...settings,
       dailyGoalMinutes: Number(goal) as SpeechSettings['dailyGoalMinutes'],
       limits: { paceMin: num(paceMin), paceMax: num(paceMax), pvqGood: num(pvq), finalDropDb: num(drop) },
     };
@@ -94,6 +97,82 @@ function Calibration({ settings, talks }: { settings: SpeechSettings; talks: { w
         <Button variant="primary" loading={update.isPending} onClick={save}>
           Salvar
         </Button>
+      </div>
+    </Card>
+  );
+}
+
+/** Keep recordings and the daily reminder (Web Push). */
+function AudioAndReminder({ settings }: { settings: SpeechSettings }) {
+  const update = useUpdateSetting('speech');
+  const push = useQuery({ queryKey: ['speech-push'], queryFn: endpoints.speech.pushStatus });
+  const [time, setTime] = useState(settings.reminder.time);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setTime(settings.reminder.time), [settings.reminder.time]);
+  const save = (patch: Partial<SpeechSettings>, done?: string) =>
+    update.mutate({ ...settings, ...patch }, { onSuccess: () => done && toast.success(done) });
+
+  const toggleReminder = async (on: boolean) => {
+    setBusy(true);
+    try {
+      if (on) {
+        if (!push.data?.publicKey) throw new Error('Os lembretes não estão configurados neste servidor.');
+        await enablePush(push.data.publicKey);
+      } else {
+        await disablePush();
+      }
+      save({ reminder: { enabled: on, time, tzOffsetMinutes: -new Date().getTimezoneOffset() } }, on ? 'Lembrete ativado.' : 'Lembrete desativado.');
+      void push.refetch();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="space-y-5 p-5">
+      <div className="space-y-1">
+        <Checkbox
+          checked={settings.keepAudio}
+          onChange={(v) => save({ keepAudio: v }, v ? 'As próximas falas terão a gravação guardada.' : 'As próximas falas não guardam a gravação.')}
+          label="Guardar a gravação das falas"
+        />
+        <p className="pl-7 text-xs text-muted">
+          Para ouvir de novo e pedir a avaliação completa (a IA ouvindo a sua voz). Ocupa cerca de 1 MB por minuto no armazenamento e não entra no backup. Os ensaios dos
+          seus discursos sempre guardam a gravação.
+        </p>
+      </div>
+      <div className="space-y-2 border-t border-border pt-4">
+        <Checkbox checked={settings.reminder.enabled} onChange={(v) => void toggleReminder(v)} label="Lembrete diário de treino" />
+        <p className="pl-7 text-xs text-muted">Uma notificação no horário escolhido, só nos dias em que você ainda não treinou. Funciona no app publicado (no iPhone, instalado na tela inicial).</p>
+        <div className="flex flex-wrap items-end gap-3 pl-7">
+          <Field label="Horário">
+            {(f) => <Input {...f} type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-32" />}
+          </Field>
+          <Button
+            variant="outline"
+            loading={update.isPending || busy}
+            disabled={!/^\d{2}:\d{2}$/.test(time)}
+            onClick={() => save({ reminder: { ...settings.reminder, time, tzOffsetMinutes: -new Date().getTimezoneOffset() } }, 'Horário salvo.')}
+          >
+            Salvar horário
+          </Button>
+          {settings.reminder.enabled && (push.data?.subscriptions ?? 0) > 0 && (
+            <Button
+              variant="ghost"
+              onClick={() =>
+                endpoints.speech
+                  .testPush()
+                  .then((r) => toast.success(r.sent ? 'Notificação de teste enviada.' : 'Nenhum navegador recebeu: ative de novo neste aparelho.'))
+                  .catch((err) => toast.error(errorMessage(err)))
+              }
+            >
+              Enviar um teste
+            </Button>
+          )}
+        </div>
+        {push.data && !push.data.publicKey && <p className="pl-7 text-xs text-subtle">Este servidor ainda não tem as chaves de notificação (VAPID).</p>}
       </div>
     </Card>
   );
@@ -167,6 +246,10 @@ export function Component() {
 
         <Section title="Configurações">
           <Calibration settings={s.settings} talks={series.map((a) => ({ wpm: a.wpm, pvq: a.pvq }))} />
+        </Section>
+
+        <Section title="Gravações e lembrete">
+          <AudioAndReminder settings={s.settings} />
         </Section>
       </div>
     </Page>

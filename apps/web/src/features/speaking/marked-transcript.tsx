@@ -32,7 +32,18 @@ const LABELS: Record<SpeechMarkKind, string> = {
 
 const overlaps = (m: SpeechMark, w: SpeechWord) => m.start < w.end - 0.01 && m.end > w.start + 0.01;
 
-export function MarkedTranscript({ words, marks, transcript }: { words: SpeechWord[]; marks: SpeechMark[]; transcript: string }) {
+export function MarkedTranscript({
+  words,
+  marks,
+  transcript,
+  onSeek,
+}: {
+  words: SpeechWord[];
+  marks: SpeechMark[];
+  transcript: string;
+  /** With a kept recording: clicking a word plays from there. */
+  onSeek?: (seconds: number) => void;
+}) {
   const layout = useMemo(() => {
     const sorted = [...words].sort((a, b) => a.start - b.start);
     const wordMarks = marks.filter((m) => m.kind !== 'hesitation' && m.kind !== 'blank' && m.kind !== 'long');
@@ -65,6 +76,7 @@ export function MarkedTranscript({ words, marks, transcript }: { words: SpeechWo
           ))}
         </ul>
       )}
+      {onSeek && <p className="text-xs text-subtle">Toque numa palavra para ouvir aquele momento.</p>}
       <p className="text-[15px] leading-8">
         {layout.map(({ w, kinds, before }, i) => (
           <Fragment key={i}>
@@ -72,8 +84,9 @@ export function MarkedTranscript({ words, marks, transcript }: { words: SpeechWo
               <PauseChip key={k} mark={p} />
             ))}
             <span
-              className={cn(...[...kinds].map((k) => WORD_STYLE[k]))}
+              className={cn(...[...kinds].map((k) => WORD_STYLE[k]), onSeek && 'cursor-pointer hover:bg-surface-2')}
               title={kinds.size ? `${clock(w.start)} · ${[...kinds].map((k) => LABELS[k]).join(' · ')}` : clock(w.start)}
+              onClick={onSeek ? () => onSeek(w.start) : undefined}
             >
               {w.text}
             </span>

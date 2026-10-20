@@ -23,6 +23,7 @@ import { cn } from '@/lib/cn';
 import { qk } from '@/lib/query';
 import { useTopics } from '../topics/use-topics';
 import { PendingBanner } from './free-page';
+import { ProjectsSection } from './projects-section';
 import { attemptTitle, clock, scoreTone } from './speaking-ui';
 import { useSpeechPath } from './use-speech-path';
 
@@ -257,6 +258,7 @@ export function Component() {
         {SPEECH_PATH.map((level) => (
           <LevelMap key={level.id} level={level} s={s} />
         ))}
+        <ProjectsSection />
         <Section title="Suas falas">
           <RecentTalks />
         </Section>

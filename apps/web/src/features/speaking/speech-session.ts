@@ -1,6 +1,8 @@
 import { createStore, del, entries, get, set } from 'idb-keyval';
+import { toast } from 'sonner';
 import {
   DICTATION_PROMPT_MAX,
+  SPEECH_AUDIO_RATE,
   SPEECH_MAX_SECONDS,
   computeSpeechMetrics,
   uuidv7,
@@ -13,6 +15,7 @@ import {
 } from '@mynotes/shared';
 import { NetworkError, errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
+import { encodeWav } from '@/lib/dictation/audio';
 import { microphoneError, startRecorder, type Recorder } from '@/lib/dictation/recorder';
 import { bytesToBase64 } from '@/lib/encoding';
 import { todayIso } from '@/lib/format';
@@ -42,6 +45,10 @@ export interface SpeechSetup {
   lessonId?: string | null;
   /** For an answer to the board: the talk the question was about. */
   parentId?: string | null;
+  /** A rehearsal of one of the user's own speeches. */
+  projectId?: string | null;
+  /** Keep the recording (listen again, full evaluation). */
+  keepAudio?: boolean;
 }
 
 /** A talk measured but not saved (short exercises: reading aloud, tongue twisters). */
@@ -132,6 +139,8 @@ export class SpeechSession {
   private disposed = false;
   /** Kept in IndexedDB (recoverable) and saved as a talk; off for short exercises. */
   private persist = true;
+  /** The recording at 8 kHz, when it is kept (in memory until the talk is saved). */
+  private kept = new KeptAudio();
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -164,12 +173,17 @@ export class SpeechSession {
     this.talk = { id: uuidv7(), setup, startedAt: new Date().toISOString(), localDay: todayIso(), words: [], segments: [], texts: [], stopped: false, elapsed: 0 };
     this.seq = 0;
     this.queue = [];
+    this.kept = new KeptAudio();
+    const keep = !!setup.keepAudio && this.persist;
     const analyzer = new SpeechAnalyzer();
     try {
       this.recorder = await startRecorder(
         {
           onSegment: (wav, start) => this.enqueue(wav, start),
-          onAudio: (samples) => analyzer.push(samples),
+          onAudio: (samples) => {
+            analyzer.push(samples);
+            if (keep) this.kept.push(samples);
+          },
           onLevel: (level) => {
             const now = performance.now();
             if (now - this.lastLevelAt < LEVEL_INTERVAL_MS) return;
@@ -392,6 +406,18 @@ export class SpeechSession {
     }
   }
 
+  /** Sends the kept recording; the talk stays saved even if this fails. */
+  private async uploadKept(attempt: SpeechAttempt): Promise<SpeechAttempt> {
+    try {
+      return await endpoints.speech.uploadAudio(attempt.id, this.kept.wav());
+    } catch (err) {
+      toast.warning(`A fala foi salva, mas a gravação não pôde ser guardada: ${errorMessage(err)}`);
+      return attempt;
+    } finally {
+      this.kept = new KeptAudio();
+    }
+  }
+
   private async save(recording: SpeechRecording): Promise<SpeechAttempt | null> {
     const talk = this.talk;
     if (!talk) return null;
@@ -407,6 +433,7 @@ export class SpeechSession {
           theme: talk.setup.theme,
           lessonId: talk.setup.lessonId ?? null,
           parentId: talk.setup.parentId ?? null,
+          projectId: talk.setup.projectId ?? null,
           startedAt: talk.startedAt,
           localDay: talk.localDay,
           transcript: recording.transcript,
@@ -416,9 +443,10 @@ export class SpeechSession {
           metrics,
         });
         await discardPendingTalk();
+        const withAudio = this.kept.length ? await this.uploadKept(attempt) : attempt;
         this.talk = null;
         this.set(IDLE);
-        return attempt;
+        return withAudio;
       } catch (err) {
         // Kept in IndexedDB: it can be saved later from the speaking page.
         this.set({ error: `Não foi possível salvar a fala: ${errorMessage(err)}` });
@@ -431,5 +459,37 @@ export class SpeechSession {
         if (this.disposed) return null;
       }
     }
+  }
+}
+
+/** The recording reduced to 8 kHz (averaging pairs of 16 kHz samples), kept until it is uploaded. */
+class KeptAudio {
+  private chunks: Float32Array[] = [];
+  private carry: number | null = null;
+  length = 0;
+
+  push(samples: Float32Array) {
+    const out = new Float32Array(Math.ceil((samples.length + (this.carry === null ? 0 : 1)) / 2));
+    let n = 0;
+    let i = 0;
+    if (this.carry !== null && samples.length) {
+      out[n++] = (this.carry + samples[0]!) / 2;
+      i = 1;
+      this.carry = null;
+    }
+    for (; i + 1 < samples.length; i += 2) out[n++] = (samples[i]! + samples[i + 1]!) / 2;
+    if (i < samples.length) this.carry = samples[i]!;
+    this.chunks.push(out.subarray(0, n));
+    this.length += n;
+  }
+
+  wav(): Uint8Array<ArrayBuffer> {
+    const all = new Float32Array(this.length);
+    let o = 0;
+    for (const c of this.chunks) {
+      all.set(c, o);
+      o += c.length;
+    }
+    return encodeWav(all, SPEECH_AUDIO_RATE);
   }
 }

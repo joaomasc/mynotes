@@ -37,6 +37,14 @@ export interface AiConfig {
     /** USD per search call, billed apart from tokens. */
     pricePerCall: number;
   };
+  /** Model that listens to recordings (speaking coach's full evaluation), via Chat Completions. */
+  audio: {
+    model: string;
+    /** USD per 1M tokens. */
+    audioInputPerMTok: number;
+    textInputPerMTok: number;
+    textOutputPerMTok: number;
+  };
 }
 
 /** Secrets and vars the assistant reads (all optional in the generated Env type). */
@@ -56,7 +64,11 @@ type AiEnv = Partial<
     | 'AI_TIMEOUT_SECONDS'
     | 'AI_WEB_SEARCH'
     | 'AI_MAX_WEB_SEARCHES'
-    | 'AI_PRICE_WEB_SEARCH_PER_CALL',
+    | 'AI_PRICE_WEB_SEARCH_PER_CALL'
+    | 'AI_AUDIO_MODEL'
+    | 'AI_PRICE_AUDIO_INPUT_PER_MTOK'
+    | 'AI_PRICE_AUDIO_TEXT_INPUT_PER_MTOK'
+    | 'AI_PRICE_AUDIO_TEXT_OUTPUT_PER_MTOK',
     string
   >
 >;
@@ -67,6 +79,9 @@ const DEFAULT_BUDGET_USD = 0.5;
 const MAX_TOOL_CALLS = 30;
 /** OpenAI's price per web search call (developers.openai.com/api/docs/pricing, checked 2026-10-20). */
 const DEFAULT_WEB_SEARCH_PRICE = 0.01;
+/** Audio model and its prices (developers.openai.com/api/docs/models/gpt-audio, checked 2026-10-20). */
+const DEFAULT_AUDIO_MODEL = 'gpt-audio';
+const DEFAULT_AUDIO_PRICES = { audioInputPerMTok: 32, textInputPerMTok: 2.5, textOutputPerMTok: 10 };
 
 function intIn(value: string | undefined, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(value ?? '', 10);
@@ -110,6 +125,13 @@ export function aiConfig(env: Env): AiConfig {
       maxPerTurn: intIn(e.AI_MAX_WEB_SEARCHES, 5, 1, 10),
       // A missing price would hide the most expensive part of a turn from the budget.
       pricePerCall: nonNegative(e.AI_PRICE_WEB_SEARCH_PER_CALL) ?? DEFAULT_WEB_SEARCH_PRICE,
+    },
+    audio: {
+      model: e.AI_AUDIO_MODEL?.trim() || DEFAULT_AUDIO_MODEL,
+      // Missing prices fall back to the published ones, never to free: the budget must see audio.
+      audioInputPerMTok: nonNegative(e.AI_PRICE_AUDIO_INPUT_PER_MTOK) ?? DEFAULT_AUDIO_PRICES.audioInputPerMTok,
+      textInputPerMTok: nonNegative(e.AI_PRICE_AUDIO_TEXT_INPUT_PER_MTOK) ?? DEFAULT_AUDIO_PRICES.textInputPerMTok,
+      textOutputPerMTok: nonNegative(e.AI_PRICE_AUDIO_TEXT_OUTPUT_PER_MTOK) ?? DEFAULT_AUDIO_PRICES.textOutputPerMTok,
     },
   };
 }

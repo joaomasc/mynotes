@@ -10,7 +10,7 @@ const KEY_RE = /^[A-Za-z0-9_-]{8,100}$/;
 /** Larger responses are not stored (the request is still applied). */
 const MAX_STORED_BYTES = 256 * 1024;
 /** Streaming uploads (whole files and parts) are naturally idempotent and are excluded: their bodies are large. */
-const EXCLUDED = [/\/documents\/[0-9a-f-]{36}\/content$/, /\/documents\/[0-9a-f-]{36}\/uploads\/parts\/\d+$/];
+const EXCLUDED = [/\/documents\/[0-9a-f-]{36}\/content$/, /\/documents\/[0-9a-f-]{36}\/uploads\/parts\/\d+$/, /\/speech\/attempts\/[0-9a-f-]{36}\/audio$/];
 
 /**
  * Replays the stored response when a mutating request is retried with the

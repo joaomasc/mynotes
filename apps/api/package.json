@@ -16,6 +16,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:migrations:list": "wrangler d1 migrations list DB --remote",
     "create-user": "node scripts/create-user.mjs",
+    "vapid": "node scripts/vapid.mjs",
     "ai:check": "node scripts/ai-check.mjs"
   },
   "dependencies": {
