@@ -87,3 +87,27 @@ test('the same note in two panes: edits in one show in the other and none is los
   await page.reload();
   await expect(panes(page).nth(0).locator('.ProseMirror')).toContainText('Começo. Escrito à esquerda. E à direita.');
 });
+
+test('switching tabs keeps each page as it was (nothing is loaded again)', async ({ page }) => {
+  await newNote(page, 'Aba A W', 'Texto da aba A.');
+  await newNote(page, 'Aba B W', 'Texto da aba B.');
+  await page.goto('/notes');
+  await page.getByRole('main').getByRole('link', { name: /Aba A W/ }).first().click();
+  const shown = page.locator('[data-tab-id]:not([aria-hidden]) .ProseMirror');
+  await expect(shown).toContainText('Texto da aba A.');
+  // A mark on the editor's element: it survives only if the page is not built again.
+  await shown.evaluate((el) => ((el as HTMLElement).dataset.mark = 'a'));
+  // Where this tab is (new tabs open right after it, so it stays there).
+  const all = tabs(page).getByRole('tab');
+  const index = await all.evaluateAll((els) => els.findIndex((e) => e.getAttribute('aria-selected') === 'true'));
+
+  // Another note in a new tab (Ctrl+click on "Notas", then the note), then back to the first tab.
+  await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Notas' }).click({ modifiers: ['Control'] });
+  await page.getByRole('main').getByRole('link', { name: /Aba B W/ }).first().click();
+  await expect(shown).toContainText('Texto da aba B.');
+  await all.nth(index).click();
+  await expect(shown).toContainText('Texto da aba A.');
+  await expect(shown).toHaveAttribute('data-mark', 'a');
+  // The other tab stays mounted, hidden.
+  await expect(page.locator('[data-tab-id][aria-hidden] .ProseMirror')).toContainText('Texto da aba B.');
+});

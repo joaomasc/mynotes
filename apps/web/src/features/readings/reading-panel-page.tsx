@@ -6,6 +6,7 @@ import { EmptyState, ErrorState, PageLoader } from '@/components/ui/feedback';
 import { ApiError } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
 import { qk } from '@/lib/query';
+import { usePane } from '../workspace/tab-info';
 import { readerSync, useReaderSync } from './reader-sync';
 import { ReadingSections, type Tab } from './reading-page';
 
@@ -37,11 +38,13 @@ export function Component() {
     if (f.annotation) setActiveId(f.annotation);
   }, [sync.focus]);
 
-  // The PDF knows its annotations are open here (and doesn't show them twice).
+  // The PDF knows its annotations are shown here (and doesn't show them twice); a tab hidden behind another doesn't count.
+  const visible = usePane()?.visible ?? true;
   useEffect(() => {
+    if (!visible) return;
     readerSync.set(id, { panels: readerSync.get(id).panels + 1 });
     return () => readerSync.set(id, { panels: Math.max(0, readerSync.get(id).panels - 1) });
-  }, [id]);
+  }, [id, visible]);
 
   if (query.isLoading) return <PageLoader />;
   if (!r) {

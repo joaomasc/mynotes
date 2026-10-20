@@ -83,7 +83,7 @@ function appPathOf(href: string): string | null {
  * the browser history (numbered in its state), so the browser's back and
  * forward buttons — and the mouse's — move through the active tab's history.
  */
-function BrowserSync() {
+function BrowserSync({ onReady }: { onReady: () => void }) {
   const location = useLocation();
   const navigationType = useNavigationType();
   const navigate = useNavigate();
@@ -115,6 +115,7 @@ function BrowserSync() {
         else if (start.path === '/' && !start.pinned) workspace.navigateActive(full, { replace: true });
         else workspace.openTab(full);
       }
+      onReady();
       void navigate(full, { replace: true, state: { ws: index.current } });
       return;
     }
@@ -217,11 +218,14 @@ export function Workspace() {
     };
   }, []);
   useLinkInterception();
+  // Panes are drawn once the opening link has picked its tab: the tab restored first would
+  // otherwise be built (and then kept, hidden) for nothing.
+  const [ready, setReady] = useState(false);
   return (
     <div className="flex min-h-0 min-w-0 flex-1" aria-label="Área de trabalho">
-      <BrowserSync />
+      <BrowserSync onReady={() => setReady(true)} />
       <WindowTitle />
-      <LayoutView node={state.root} activePane={state.activePane} />
+      {ready && <LayoutView node={state.root} activePane={state.activePane} />}
     </div>
   );
 }
@@ -318,9 +322,17 @@ const ZONE_STYLE: Record<DropZone, string> = {
   bottom: 'inset-x-2 bottom-2 h-[calc(50%-0.5rem)]',
 };
 
+/** Tabs kept alive per pane (most recently shown): switching back to them is instant, as they were left. */
+const KEEP_MOUNTED = 8;
+
 function PaneView({ pane, active }: { pane: PaneNode; active: boolean }) {
   const [zone, setZone] = useState<DropZone | null>(null);
   const tab = pane.tabs.find((t) => t.id === pane.active) ?? pane.tabs[0]!;
+  // Tabs already shown stay mounted, hidden (like Obsidian): no new load, same scroll, editor and PDF.
+  const [recent, setRecent] = useState<string[]>([tab.id]);
+  const shownRecent = recent[0] === tab.id ? recent : [tab.id, ...recent.filter((id) => id !== tab.id)].slice(0, KEEP_MOUNTED);
+  if (shownRecent !== recent) setRecent(shownRecent);
+  const mounted = pane.tabs.filter((t) => shownRecent.includes(t.id));
   return (
     <section
       className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg"
@@ -347,7 +359,9 @@ function PaneView({ pane, active }: { pane: PaneNode; active: boolean }) {
           workspace.moveTab(tabId, pane.id, zoneAt(e, e.currentTarget));
         }}
       >
-        <PaneContent key={tab.id} tab={tab} paneId={pane.id} active={active} />
+        {mounted.map((t) => (
+          <PaneContent key={t.id} tab={t} paneId={pane.id} active={active} visible={t.id === tab.id} />
+        ))}
         {zone && <div className={cn('pointer-events-none absolute z-30 rounded-lg border-2 border-accent bg-accent/10', ZONE_STYLE[zone])} aria-hidden />}
       </div>
     </section>
@@ -360,7 +374,7 @@ const ROUTE_CONTEXT_RESET = { outlet: null, matches: [], isDataRoute: false } as
  * One tab's page, with its own router. The browser router's contexts are
  * cleared here so the tab's router is a root of its own.
  */
-function PaneContent({ tab, paneId, active }: { tab: TabState; paneId: string; active: boolean }) {
+function PaneContent({ tab, paneId, active, visible }: { tab: TabState; paneId: string; active: boolean; visible: boolean }) {
   const router = useMemo(() => tabRouter(tab), [tab]);
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -373,13 +387,16 @@ function PaneContent({ tab, paneId, active }: { tab: TabState; paneId: string; a
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const info = useMemo(() => ({ paneId, tabId: tab.id, width: size.width, height: size.height, active }), [paneId, tab.id, size, active]);
+  const info = useMemo(() => ({ paneId, tabId: tab.id, width: size.width, height: size.height, active, visible }), [paneId, tab.id, size, active, visible]);
   return (
     <div
       ref={ref}
       data-pane-scroll
       data-tab-id={tab.id}
-      className="scrollbar-thin absolute inset-0 overflow-x-hidden overflow-y-auto"
+      // Hidden tabs keep their size and scroll (visibility, not display) but can't be reached or focused.
+      inert={!visible}
+      aria-hidden={!visible || undefined}
+      className={cn('scrollbar-thin absolute inset-0 overflow-x-hidden overflow-y-auto', !visible && 'invisible')}
       style={{ '--view-h': `${size.height || 600}px` } as React.CSSProperties}
     >
       <PaneContext.Provider value={info}>

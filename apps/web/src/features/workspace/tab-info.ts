@@ -105,7 +105,10 @@ export interface PaneInfo {
   tabId: string;
   width: number;
   height: number;
+  /** The pane has the focus. */
   active: boolean;
+  /** The tab is the one shown in its pane (other tabs stay mounted, hidden). */
+  visible: boolean;
 }
 export const PaneContext = createContext<PaneInfo | null>(null);
 export const usePane = () => useContext(PaneContext);
