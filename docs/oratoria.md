@@ -53,7 +53,7 @@ Corpo, gestos e olhar ficam **fora do escopo**, porque exigiriam câmera.
 |---|---|---|---|---|
 | **Frases** | Curtas ou médias, com uma ideia por frase (a fala não é um texto escrito) | Frases que se arrastam, com vários “que” encadeados | Medido (palavras por frase) + IA | Média até ~20 palavras; alerta acima de ~35. A pontuação é estimada pelo Whisper, então a medida é aproximada |
 | **Vícios de linguagem** | Raros, a ponto de não serem percebidos | “né”, “tipo”, “então”, “aí”, “assim”, “basicamente”, “enfim”, “éé” repetidos | Medido (por minuto, com marcação no texto) | Bom: até 2/min · atenção: 2 a 5/min · a melhorar: mais de 5/min. O Whisper tende a omitir “éé” e “hmm”, então esses ficam subcontados |
-| **Linguagem firme** (palavras fracas e atenuadores) | Afirma o que sabe e só atenua quando a incerteza é real | Excesso de “acho que”, “talvez”, “meio que”, “um pouquinho”, “só queria falar”, “não sei se ficou claro”, “bem”, “realmente”, “super” | Medido (lista de palavras fracas) + IA | Bom: até 1/min |
+| **Linguagem firme** (palavras fracas e atenuadores) | Afirma o que sabe e só atenua quando a incerteza é real | Excesso de “acho que”, “talvez”, “meio que”, “um pouquinho”, “só queria falar”, “não sei se ficou claro”, “sei lá”, “realmente”, “super” | Medido (lista de palavras fracas) + IA | Bom: até 1/min |
 | **Repetição** | Repete de propósito, para fixar uma ideia | A mesma palavra comum várias vezes em sequência, por falta de alternativa | Medido + IA | — |
 | **Precisão** | Termos técnicos definidos na primeira vez em que aparecem | Jargão sem explicação; “coisa” ou “negócio” no lugar do conceito | IA (texto) | — |
 

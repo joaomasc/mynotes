@@ -18,6 +18,7 @@ import {
   Lightbulb,
   Link as LinkIcon,
   ListTodo,
+  Mic,
   Network,
   Pin,
   PinOff,
@@ -58,6 +59,7 @@ const ICONS: Record<string, ComponentType<LucideProps>> = {
   document: FileText,
   concept: Lightbulb,
   assistant: Sparkles,
+  speaking: Mic,
 };
 
 export function useWorkspace() {

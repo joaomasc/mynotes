@@ -52,6 +52,9 @@ import type {
   Session,
   Setting,
   SettingKey,
+  SpeechAttempt,
+  SpeechAttemptCreate,
+  SpeechAttemptSummary,
   StudySession,
   StudySessionCreate,
   StudySessionUpdate,
@@ -245,6 +248,15 @@ export const endpoints = {
     commit: (jobId: string, chunkCount: number, confirm?: string) =>
       api.post<ImportResult>(`/backup/imports/${jobId}/commit`, { chunkCount, ...(confirm ? { confirm } : {}) }),
     cancel: (jobId: string) => api.del(`/backup/imports/${jobId}`),
+  },
+
+  speech: {
+    list: (q: { topicId?: string; cursor?: string; limit?: number } = {}) => api.page<SpeechAttemptSummary>('/speech/attempts', q),
+    get: (id: string) => api.get<SpeechAttempt>(`/speech/attempts/${id}`),
+    create: (body: SpeechAttemptCreate) => api.post<SpeechAttempt>('/speech/attempts', body),
+    remove: (id: string) => api.del(`/speech/attempts/${id}`),
+    evaluate: (id: string, force = false) =>
+      api.post<SpeechAttempt>(`/speech/attempts/${id}/evaluate`, { force }, { retries: 0, track: false }),
   },
 
   transcriptions: {

@@ -293,12 +293,20 @@ No **painel inicial**, um cartão “Oratória” mostra a sequência de dias e 
 
 | Etapa | Entrega | Pronto quando |
 |---|---|---|
-| **1. Motor de análise** | Gravador com opções de captura e fila em IndexedDB; Analisador acústico; transcrição com `detail: "words"`; métricas; régua como dados; tela de resultado; fala livre e “explicar um assunto”; avaliação de texto pela IA; histórico | Uma fala de 2 minutos gera resultado completo e explicado; as gravações de calibração apontam os problemas certos |
+| **1. Motor de análise** ✓ | Gravador com opções de captura e fila em IndexedDB; Analisador acústico; transcrição com `detail: "words"`; métricas; régua como dados; tela de resultado; fala livre e “explicar um assunto”; avaliação de texto pela IA; histórico | Uma fala de 2 minutos gera resultado completo e explicado; as gravações de calibração apontam os problemas certos |
 | **2. Calibração e nível 1** | Linha de base (unidade 1) e ajuste dos limites; conteúdo do nível 1; player de lições com todos os tipos de exercício; XP, meta diária e sequência de dias; aquecimento e Discurso do Dia; cartão no painel | Dá para fazer a sessão diária completa do nível 1 no celular |
 | **3. Níveis 2 e 3** | Conteúdo; biblioteca de métodos; banca de perguntas; níveis de habilidade e lições de revisão; variações geradas pela IA; desafios de nível | A trilha até a unidade 16 funciona com revisões automáticas |
 | **4. Discurso próprio** | Nível 4 com projetos ligados a notas; ensaios comparados; avaliação completa com áudio; guardar áudio; lembrete por Web Push | Um discurso vai da ideia à apresentação final dentro do app |
 
 A etapa 1 já é útil sozinha (treino livre com retorno detalhado) e valida a parte mais arriscada, as medições, antes de escrever o conteúdo da trilha.
+
+**Etapa 1 entregue** (página `/speaking`), com estas diferenças em relação à planta:
+
+- A fala de “explicar um assunto” **ainda não cria sessão de estudo**: depende de mudar a restrição de `study_sessions.source` (ver [Integração](#integração-com-o-resto-do-mynotes)).
+- As listas de vícios e de palavras fracas são fixas (`packages/shared/src/speech/lexicon.ts`); “bem” ficou de fora por ser ambíguo demais.
+- Os limites ainda não são calibráveis pela interface: usam os padrões de `packages/shared/src/speech/limits.ts`.
+- Presença e estabilidade da voz aparecem como “próxima etapa” (dependem da IA ouvindo).
+- O gasto da IA (registro e orçamento diário) passou para `apps/api/src/modules/assistant/usage.ts`, usado pelo assistente e pela avaliação de falas.
 
 ## Riscos e pontos a confirmar
 

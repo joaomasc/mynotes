@@ -34,6 +34,7 @@ const PAGE_SIZE: Partial<Record<BackupTableName, number>> = {
   notes: 100,
   note_revisions: 100,
   mind_maps: 100,
+  speech_attempts: 20,
 };
 
 /* ----------------------------------------------------------------- export */

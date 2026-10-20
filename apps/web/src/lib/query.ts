@@ -111,4 +111,6 @@ export const qk = {
   aiIndex: ['ai-index'] as const,
   aiConversations: ['ai-conversations'] as const,
   aiConversation: (id: string) => ['ai-conversation', id] as const,
+  speechAttempts: ['speech-attempts'] as const,
+  speechAttempt: (id: string) => ['speech-attempt', id] as const,
 };

@@ -229,3 +229,10 @@ export const DICTATION_SEGMENT_MAX_SECONDS = 40;
 export const DICTATION_AUDIO_MAX_BYTES = 44 + (DICTATION_SEGMENT_MAX_SECONDS + 2) * DICTATION_SAMPLE_RATE * 2;
 /** Recent text sent as context (vocabulary, punctuation style). */
 export const DICTATION_PROMPT_MAX = 400;
+
+/** Speaking practice: the longest talk recorded at once (15 min). */
+export const SPEECH_MAX_SECONDS = 15 * 60;
+/** Analysis frame of the browser analyzer (loudness, pitch). */
+export const SPEECH_FRAME_SECONDS = 0.02;
+/** Resolution of the loudness/pitch timeline kept with a talk (charts). */
+export const SPEECH_TIMELINE_STEP = 0.1;

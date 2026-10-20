@@ -69,17 +69,39 @@ const LONG_PAUSE = framesFor(1.2);
 const MIN_FRAMES_FOR_LONG_PAUSE = framesFor(3);
 
 /**
+ * Speech/silence decision against an adaptive noise floor. The floor drops at
+ * once in quiet moments and rises over tens of seconds (steady noise such as
+ * a fan), never fast enough to swallow speech.
+ */
+export class NoiseGate {
+  private floor = 0.004;
+
+  /** Feeds one frame's level; true when it is speech. */
+  update(level: number): boolean {
+    this.floor = level < this.floor ? level : this.floor + (level - this.floor) * 0.0005;
+    return level > this.threshold();
+  }
+
+  threshold(): number {
+    return Math.min(MAX_SPEECH_THRESHOLD, Math.max(MIN_SPEECH_RMS, this.floor * 3));
+  }
+}
+
+/**
  * Cuts a 16 kHz stream into segments at pauses. Silence before speech is
  * trimmed, so long pauses never produce (or pay for) empty requests.
  */
 export class Segmenter {
   private frames: Float32Array[] = [];
+  /** Index (in frames since the stream started) of frames[0]. */
+  private base = 0;
+  private readonly starts = new WeakMap<Float32Array, number>();
   private levels: number[] = [];
   private voiced = 0;
   private silentRun = 0;
   private partial = new Float32Array(FRAME);
   private partialLength = 0;
-  private noiseFloor = 0.004;
+  private readonly gate = new NoiseGate();
 
   /** Feeds 16 kHz samples; returns the segments completed by them. */
   push(samples: Float32Array): Float32Array[] {
@@ -112,10 +134,7 @@ export class Segmenter {
 
   private addFrame(frame: Float32Array): Float32Array | null {
     const level = rms(frame);
-    // The floor drops at once in quiet moments and rises over tens of seconds
-    // (steady noise such as a fan), never fast enough to swallow speech.
-    this.noiseFloor = level < this.noiseFloor ? level : this.noiseFloor + (level - this.noiseFloor) * 0.0005;
-    const isSpeech = level > this.threshold();
+    const isSpeech = this.gate.update(level);
 
     this.frames.push(frame);
     this.levels.push(level);
@@ -131,6 +150,7 @@ export class Segmenter {
       if (this.frames.length > LEAD_FRAMES) {
         this.frames.shift();
         this.levels.shift();
+        this.base++;
       }
       return null;
     }
@@ -157,17 +177,20 @@ export class Segmenter {
     return null;
   }
 
-  private threshold(): number {
-    return Math.min(MAX_SPEECH_THRESHOLD, Math.max(MIN_SPEECH_RMS, this.noiseFloor * 3));
+  /** Seconds from the start of the stream to the first sample of a segment this segmenter returned. */
+  startOf(segment: Float32Array): number {
+    return ((this.starts.get(segment) ?? 0) * FRAME) / DICTATION_SAMPLE_RATE;
   }
 
   /** Removes the first `count` frames and returns them as one segment (null when silent). */
   private take(count: number): Float32Array | null {
     const frames = this.frames.splice(0, count);
     const levels = this.levels.splice(0, count);
+    const start = this.base;
+    this.base += count;
     const voiced = this.voiced;
     // Recount speech in what stays (after a forced cut).
-    this.voiced = this.levels.filter((l) => l > this.threshold()).length;
+    this.voiced = this.levels.filter((l) => l > this.gate.threshold()).length;
     this.silentRun = 0;
     const speech = voiced - this.voiced;
     if (speech < MIN_VOICED_FRAMES || levels.length === 0) return null;
@@ -177,6 +200,7 @@ export class Segmenter {
       out.set(f, offset);
       offset += f.length;
     }
+    this.starts.set(out, start);
     return out;
   }
 }

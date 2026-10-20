@@ -77,6 +77,10 @@ export interface ResponsesRequest {
   maxHostedToolCalls?: number;
   /** Overrides the configured timeout (turns with web search take longer). */
   timeoutMs?: number;
+  /** Structured output: the answer is JSON valid against this schema (strict mode). */
+  textFormat?: { name: string; schema: Record<string, unknown> };
+  /** Overrides AI_MAX_OUTPUT_TOKENS (structured answers have a known size). */
+  maxOutputTokens?: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -178,11 +182,11 @@ function requestBody(cfg: AiConfig, req: ResponsesRequest, stream: boolean): str
     model: cfg.model,
     instructions: req.instructions,
     input: req.input,
-    tools: req.tools,
-    tool_choice: req.toolChoice,
-    parallel_tool_calls: true,
+    // Tool settings only with tools: the API rejects parallel_tool_calls without them.
+    ...(req.tools.length ? { tools: req.tools, tool_choice: req.toolChoice, parallel_tool_calls: true } : {}),
     ...(req.maxHostedToolCalls !== undefined ? { max_tool_calls: req.maxHostedToolCalls } : {}),
-    max_output_tokens: cfg.maxOutputTokens,
+    ...(req.textFormat ? { text: { format: { type: 'json_schema', name: req.textFormat.name, schema: req.textFormat.schema, strict: true } } } : {}),
+    max_output_tokens: req.maxOutputTokens ?? cfg.maxOutputTokens,
     ...(cfg.reasoningEffort ? { reasoning: { effort: cfg.reasoningEffort } } : {}),
     store: false,
     ...(stream ? { stream: true } : {}),

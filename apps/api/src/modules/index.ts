@@ -8,6 +8,7 @@ import { overviewRoutes } from './overview/routes';
 import { planRoutes } from './plans/routes';
 import { readingRoutes } from './readings/routes';
 import { referenceRoutes } from './references/routes';
+import { speechRoutes } from './speech/routes';
 import { studyRoutes } from './study/routes';
 import { topicRoutes } from './topics/routes';
 import { transcriptionRoutes } from './transcriptions/routes';
@@ -28,4 +29,5 @@ export const routeModules: RouteModule[] = [
   backupRoutes,
   transcriptionRoutes,
   assistantRoutes,
+  speechRoutes,
 ];

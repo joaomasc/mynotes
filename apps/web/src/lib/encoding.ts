@@ -18,3 +18,13 @@ export function randomId(bytes = 16): string {
   crypto.getRandomValues(buf);
   return toBase64Url(buf);
 }
+
+/** Standard base64 of binary data (audio, files), without blocking on large inputs. */
+export function bytesToBase64(bytes: Uint8Array<ArrayBuffer>, type = 'application/octet-stream'): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(',') + 1));
+    reader.onerror = () => reject(reader.error ?? new Error('Falha ao ler o áudio'));
+    reader.readAsDataURL(new Blob([bytes], { type }));
+  });
+}

@@ -38,6 +38,7 @@ import {
   type WebSearchTool,
 } from './openai';
 import { hasWriteIntent, systemInstructions, webSearchMessage } from './prompt';
+import { secondsUntilUtcMidnight, usageStatement } from './usage';
 import { graphTools } from './tools/graph';
 import { hybridSearch, presentResults, readTools } from './tools/read';
 import { SourceCollector, truncate, type SourceInfo, type ToolContext, type ToolOutput } from './tools/types';
@@ -352,37 +353,6 @@ export async function verifyCitations(db: D1Database, userId: string, text: stri
     return /^(https?:\/\/|mailto:)/i.test(href) ? whole : label;
   });
   return { content, cited: [...cited.values()] };
-}
-
-/* -------------------------------------------------------------- usage -- */
-
-function secondsUntilUtcMidnight(): number {
-  const now = new Date();
-  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
-  return Math.ceil((next - now.getTime()) / 1000);
-}
-
-function usageStatement(db: D1Database, userId: string, day: string, usage: TokenUsage, cost: number, requests: number) {
-  return stmt(
-    db,
-    `INSERT INTO ai_usage_daily (user_id, day, requests, input_tokens, cached_tokens, output_tokens, reasoning_tokens, cost_usd)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (user_id, day) DO UPDATE SET
-       requests = requests + excluded.requests,
-       input_tokens = input_tokens + excluded.input_tokens,
-       cached_tokens = cached_tokens + excluded.cached_tokens,
-       output_tokens = output_tokens + excluded.output_tokens,
-       reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
-       cost_usd = cost_usd + excluded.cost_usd`,
-    userId,
-    day,
-    requests,
-    usage.inputTokens,
-    usage.cachedTokens,
-    usage.outputTokens,
-    usage.reasoningTokens,
-    cost,
-  );
 }
 
 /* --------------------------------------------------------------- chat -- */

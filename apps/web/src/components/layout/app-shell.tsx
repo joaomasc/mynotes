@@ -12,6 +12,7 @@ import {
   ListTodo,
   LogOut,
   Menu as MenuIcon,
+  Mic,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
@@ -61,6 +62,7 @@ const NAV = [
   { to: '/library', label: 'Biblioteca', icon: LibraryBig, also: ['/readings'] },
   { to: '/graph', label: 'Grafo', icon: Waypoints, also: [] },
   { to: '/assistant', label: 'Assistente', icon: Sparkles, also: [] },
+  { to: '/speaking', label: 'Oratória', icon: Mic, also: [] },
 ];
 
 const MORE: { to: string; label: string; icon: typeof House }[] = [

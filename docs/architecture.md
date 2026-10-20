@@ -34,7 +34,8 @@
 | concepts, relations, mind-maps, graph | conhecimento e visualização |
 | search, dashboard, favorites, activity, settings, trash | transversais |
 | backup | `manifest`, `export/{tabela}`, `imports` (+ `chunks`, `commit`) |
-| transcriptions | `POST transcriptions`: um trecho de ditado (WAV em base64) → texto, via Workers AI |
+| transcriptions | `POST transcriptions`: um trecho de ditado (WAV em base64) → texto, via Workers AI; com `detail: "words"`, também os trechos (com confiança) e os tempos das palavras |
+| speech | `speech/attempts` (lista, `POST`, `{id}`, `DELETE`), `speech/attempts/{id}/evaluate`: falas do treino de oratória, medidas no navegador; a API recalcula a régua e pede a avaliação de texto à OpenAI ([oratoria-tecnico.md](oratoria-tecnico.md)) |
 | assistant | `ai/status`, `ai/chat` e `ai/chat/stream` (SSE), `ai/conversations` (+ `{id}`, `DELETE`), `ai/actions/{id}/confirm` e `/reject`, `ai/index` e `ai/index/sync`: assistente com ferramentas sobre os dados reais, via OpenAI Responses API, e busca híbrida com índice semântico no Vectorize ([ai.md](ai.md)) |
 
 Documentação viva: `GET /api/v1/docs` (Scalar) e `GET /api/v1/openapi.json`.

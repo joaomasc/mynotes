@@ -81,8 +81,21 @@ export async function transcribe(ai: Ai, input: TranscriptionCreate): Promise<Tr
     console.error(JSON.stringify({ level: 'error', msg: 'transcription failed', error: message.slice(0, 300) }));
     throw new ApiError('internal_error', 'Não foi possível transcrever o áudio agora. Tente de novo em instantes.');
   }
+  const text = cleanTranscript(result.text ?? '');
+  const base = { text, durationSeconds: result.transcription_info?.duration ?? 0 };
+  if (input.detail !== 'words') return base;
+  // Segments whose text was dropped as invented are dropped with their words.
+  const kept = text ? (result.segments ?? []).filter((s) => cleanTranscript(s.text ?? '') !== '') : [];
   return {
-    text: cleanTranscript(result.text ?? ''),
-    durationSeconds: result.transcription_info?.duration ?? 0,
+    ...base,
+    segments: kept.map((s) => ({
+      start: s.start ?? 0,
+      end: s.end ?? 0,
+      text: (s.text ?? '').trim(),
+      avgLogprob: typeof s.avg_logprob === 'number' && Number.isFinite(s.avg_logprob) ? Math.min(0, s.avg_logprob) : null,
+    })),
+    words: kept.flatMap((s) =>
+      (s.words ?? []).filter((w) => (w.word ?? '').trim()).map((w) => ({ text: (w.word ?? '').trim(), start: w.start ?? 0, end: w.end ?? 0 })),
+    ),
   };
 }

@@ -26,6 +26,8 @@ const FIXED: [string, string, string][] = [
   ['/graph', 'Grafo', 'graph'],
   ['/search', 'Busca', 'search'],
   ['/assistant', 'Assistente', 'assistant'],
+  ['/speaking', 'Oratória', 'speaking'],
+  ['/speaking/attempts/:id', 'Resultado da fala', 'speaking'],
   ['/settings', 'Configurações', 'settings'],
   ['/trash', 'Lixeira', 'trash'],
 ];
@@ -52,7 +54,7 @@ export function pathTarget(path: string): PathTarget {
     if (annotation) return { entity: { type: 'note', id: annotation }, fixed: null, icon: 'reading' };
     return { entity: { type, id: m.params.id }, fixed: pattern.endsWith('/map') ? 'map' : pattern.endsWith('/panel') ? 'panel' : null, icon: type };
   }
-  const fixed = FIXED.find(([p]) => p === pathname);
+  const fixed = FIXED.find(([p]) => matchPath(p, pathname));
   return { entity: null, fixed: fixed?.[1] ?? 'MyNotes', icon: fixed?.[2] ?? 'home' };
 }
 

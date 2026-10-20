@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { DICTATION_PROMPT_MAX } from '@mynotes/shared';
 import { NetworkError, errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
+import { bytesToBase64 } from '@/lib/encoding';
 import { microphoneError, startRecorder, type Recorder } from '@/lib/dictation/recorder';
 
 export type DictationStatus = 'idle' | 'starting' | 'recording' | 'finishing';
@@ -28,15 +29,6 @@ const IDLE: DictationState = { status: 'idle', elapsed: 0, level: 0, pending: 0,
 /** Long enough for any note; stops a microphone left on by mistake. */
 const MAX_SECONDS = 30 * 60;
 const LEVEL_INTERVAL_MS = 80;
-
-function toBase64(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(',') + 1));
-    reader.onerror = () => reject(reader.error ?? new Error('Falha ao ler o áudio'));
-    reader.readAsDataURL(new Blob([bytes], { type: 'audio/wav' }));
-  });
-}
 
 /**
  * Dictation for one editor: records speech, sends it in segments for
@@ -188,7 +180,7 @@ export class Dictation {
   }
 
   private enqueue(wav: Uint8Array<ArrayBuffer>) {
-    this.queue.push(toBase64(wav));
+    this.queue.push(bytesToBase64(wav, 'audio/wav'));
     this.set({ pending: this.queue.length });
     void this.pump();
   }
