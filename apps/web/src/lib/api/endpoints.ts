@@ -60,6 +60,8 @@ import type {
   SpeechPathState,
   SpeechPracticeCreate,
   SpeechPracticeResult,
+  SkillId,
+  VariantExercise,
   StudySession,
   StudySessionCreate,
   StudySessionUpdate,
@@ -265,6 +267,8 @@ export const endpoints = {
     path: (today: string) => api.get<SpeechPathState>('/speech/path', { today }),
     practice: (body: SpeechPracticeCreate) => api.post<SpeechPracticeResult>('/speech/practice', body),
     feedback: (body: SpeechFeedbackRequest) => api.post<SpeechFeedback>('/speech/feedback', body, { retries: 0, track: false }),
+    questions: (id: string, force = false) => api.post<SpeechAttempt>(`/speech/attempts/${id}/questions`, { force }, { retries: 0, track: false }),
+    variants: (skill: SkillId) => api.get<VariantExercise[]>('/speech/variants', { skill }),
   },
 
   transcriptions: {

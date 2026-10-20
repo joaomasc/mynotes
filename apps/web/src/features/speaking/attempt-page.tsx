@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ArrowDown, Dumbbell, Ellipsis, Mic, RefreshCw, Sparkles, Trash } from 'lucide-react';
+import { ArrowDown, Dumbbell, Ellipsis, Gavel, Mic, RefreshCw, Sparkles, Trash } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   CRITERIA_INFO,
@@ -154,6 +154,11 @@ export function Component() {
         } · ${SPEECH_TYPE_LABELS[attempt.speechType]}`}
         actions={
           <>
+            {aiReady && attempt.speechType !== 'qa' && attempt.transcript.trim() && (
+              <Button variant="outline" icon={<Gavel className="size-4" />} onClick={() => void navigate(`/speaking/attempts/${attempt.id}/banca`)}>
+                Treinar a banca
+              </Button>
+            )}
             <Button variant="outline" icon={<Mic className="size-4" />} onClick={() => void navigate(attempt.lessonId ? `/speaking/lesson/${attempt.lessonId}` : attempt.topicId ? `/speaking/free?topic=${attempt.topicId}` : '/speaking/free')}>
               Falar de novo
             </Button>
@@ -176,6 +181,14 @@ export function Component() {
       />
 
       <div className="space-y-8">
+        {attempt.parentId && (
+          <p className="rounded-lg bg-surface-2 p-3 text-sm">
+            Resposta à pergunta da banca: <span className="font-medium">“{attempt.theme}”</span>.{' '}
+            <Link to={`/speaking/attempts/${attempt.parentId}`} className="text-accent hover:underline">
+              Ver a fala original
+            </Link>
+          </p>
+        )}
         <Card className="flex items-center gap-5 p-5">
           <div className="text-center">
             <p className={cn('text-5xl font-semibold tabular-nums', scoreTone(attempt.score))}>{attempt.score ?? '—'}</p>

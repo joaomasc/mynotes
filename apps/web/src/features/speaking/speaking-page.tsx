@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { BarChart3, Check, ChevronRight, Flame, Lock, Mic, Sparkles, Sun, Trophy, Wind } from 'lucide-react';
+import { BarChart3, BookOpen, Check, ChevronRight, Flame, Lock, Mic, Sparkles, Sun, Trophy, Wind } from 'lucide-react';
 import {
   SKILL_LABELS,
   SPEECH_PATH,
@@ -236,6 +236,9 @@ export function Component() {
             </Button>
             <Button variant="outline" icon={<BarChart3 className="size-4" />} onClick={() => void navigate('/speaking/progress')}>
               Progresso
+            </Button>
+            <Button variant="outline" icon={<BookOpen className="size-4" />} onClick={() => void navigate('/speaking/methods')}>
+              Métodos
             </Button>
           </>
         }

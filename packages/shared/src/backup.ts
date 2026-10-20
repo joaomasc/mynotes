@@ -280,6 +280,8 @@ export const BACKUP_TABLES = {
       fillers_per_minute: z.number().min(0),
       pvq: z.number().min(0).nullable(),
       lesson_id: str(64).nullable().default(null),
+      parent_id: zId.nullable().default(null),
+      questions_json: nullableStr(10_000).default(null),
       ...versioned,
     }),
   },

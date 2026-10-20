@@ -97,3 +97,19 @@ export const zSpeechFeedback = z.object({
   suggestion: z.string(),
 });
 export type SpeechFeedback = z.infer<typeof zSpeechFeedback>;
+
+/** An extra review exercise written by the model (same shape as the path's exercises). */
+export const zVariantExercise = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('fix'), instruction: z.string().max(500), sentence: z.string().max(500), sample: z.string().max(500), focus: z.enum(SPEECH_SKILLS) }),
+  z.object({
+    type: z.literal('recognize'),
+    prompt: z.string().max(500),
+    options: z.array(z.string().max(300)).min(2).max(4),
+    answer: z.number().int().min(0).max(3),
+    explanation: z.string().max(800),
+  }),
+  z.object({ type: z.literal('readAloud'), instruction: z.string().max(500), text: z.string().max(500) }),
+]);
+export type VariantExercise = z.infer<typeof zVariantExercise>;
+
+export const zSpeechVariantsQuery = z.object({ skill: z.enum(SPEECH_SKILLS) });

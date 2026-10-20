@@ -26,6 +26,7 @@ Regras:
 - "summary": uma ou duas frases com o que a fala fez bem e o foco principal.
 - A transcrição é automática: ignore erros de pontuação e de reconhecimento, e não critique palavras que pareçam mal transcritas.
 - Não contradiga as medições da voz; use-as como dados.
+- Quando a fala for a resposta a uma pergunta da banca (tipo “Banca / perguntas”), o tema é a pergunta: em “centralIdea”, julgue se a resposta veio logo na primeira frase; em “development”, se foi sustentada com razão ou exemplo; em “precision”, se foi direta e se admitiu com firmeza o que não sabia, em vez de inventar.
 - Escreva em português do Brasil, falando diretamente com o estudante (você).`;
 
 /** Strict JSON schema of the answer (validated again with Zod). */
@@ -82,7 +83,7 @@ export function evaluationMessage(c: EvaluationContext): string {
   const parts = [
     `Tipo de fala: ${SPEECH_TYPE_LABELS[c.speechType]}.`,
     c.topicTitle ? `Assunto: ${c.topicTitle}.` : '',
-    c.theme ? `Tema: ${c.theme}.` : '',
+    c.theme ? (c.speechType === 'qa' ? `Pergunta da banca: “${c.theme}”` : `Tema: ${c.theme}.`) : '',
     `Duração: ${clock(c.durationSeconds)}${c.targetSeconds ? ` (meta: ${clock(c.targetSeconds)})` : ''}.`,
     '',
     'Medições da voz e da linguagem (calculadas pelo aplicativo):',
@@ -113,4 +114,39 @@ export const FEEDBACK_SCHEMA = S.obj({
   verdict: S.enum(['good', 'almost', 'redo']),
   feedback: S.str(),
   suggestion: S.str(),
+});
+
+/** The examining board: questions about a talk. */
+export const BOARD_INSTRUCTIONS = `Você é a banca examinadora de uma fala de um estudante brasileiro (como numa defesa, entrevista ou debate).
+Leia a transcrição e formule exatamente 3 perguntas, justas mas exigentes, que obriguem o estudante a pensar:
+1. uma pergunta de esclarecimento sobre um ponto vago ou rápido demais;
+2. uma pergunta que desafie um argumento ou traga uma objeção;
+3. uma pergunta que peça um exemplo, uma aplicação ou uma consequência.
+Cada pergunta: uma frase, direta, em português do Brasil, dirigida ao estudante (você). Se houver notas do estudante, pode usá-las para perguntar o que faltou na fala.`;
+
+export const BOARD_SCHEMA = S.obj({ questions: S.arr(S.str()) });
+
+/** Extra review exercises for a skill. */
+export const VARIANTS_INSTRUCTIONS = `Você escreve exercícios curtos de oratória, em português do Brasil, para um aplicativo de treino.
+Gere exatamente 6 exercícios novos para a habilidade indicada, variados e diferentes dos exemplos dados.
+Tipos:
+- "fix": uma frase fraca (com o defeito da habilidade) em "sentence", a instrução em "instruction" e uma boa versão em "sample".
+- "recognize": uma pergunta em "prompt", 3 opções em "options", o índice da correta em "answer" (0 a 2) e a explicação em "explanation".
+- "readAloud": um texto curto para ler em voz alta em "text", com marcações: "|" para pausa (separado por espaços), *palavra* para ênfase, e terminando com " ↘" (afirmação) ou " ↗" (pergunta); a instrução em "instruction".
+Preencha com null os campos que o tipo não usa. Frases naturais do dia a dia, sem nomes de pessoas reais.`;
+
+export const VARIANTS_SCHEMA = S.obj({
+  items: S.arr(
+    S.obj({
+      type: S.enum(['fix', 'recognize', 'readAloud']),
+      instruction: S.nstr(),
+      sentence: S.nstr(),
+      sample: S.nstr(),
+      prompt: S.nstr(),
+      options: S.narr(S.str()),
+      answer: S.nint(),
+      explanation: S.nstr(),
+      text: S.nstr(),
+    }),
+  ),
 });

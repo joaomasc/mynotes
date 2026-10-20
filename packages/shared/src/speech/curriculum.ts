@@ -28,7 +28,9 @@ export type Exercise =
   /** Breathing: inhale, hold, exhale (seconds), repeated. */
   | { type: 'breathing'; instruction: string; inhale: number; hold: number; exhale: number; rounds: number }
   /** Talk for a while on a theme, with goals over the metrics. */
-  | { type: 'shortTalk'; instruction: string; topic: TalkTopic; seconds: number; goals: SpeechGoal[]; method?: MethodId; speechType?: SpeechType };
+  | { type: 'shortTalk'; instruction: string; topic: TalkTopic; seconds: number; goals: SpeechGoal[]; method?: MethodId; speechType?: SpeechType }
+  /** The examining board: answer each question out loud, with goals per answer. */
+  | { type: 'qa'; instruction: string; questions: string[]; seconds: number; goals: SpeechGoal[] };
 
 export type ExerciseType = Exercise['type'];
 

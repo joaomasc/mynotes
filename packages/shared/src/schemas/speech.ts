@@ -125,6 +125,8 @@ export const zSpeechAttemptCreate = z.object({
   theme: z.string().trim().max(300).default(''),
   /** The lesson or challenge it was recorded in (null: free practice). */
   lessonId: z.string().max(64).nullable().default(null),
+  /** For an answer to the board: the talk the question was about. */
+  parentId: zId.nullable().default(null),
   startedAt: zDateTime,
   /** Calendar day in the user's time zone (streaks are counted on it). */
   localDay: zDate,
@@ -151,6 +153,7 @@ export const zSpeechAttemptSummary = z.object({
   fillersPerMinute: z.number(),
   pvq: z.number().nullable(),
   lessonId: z.string().nullable(),
+  parentId: zId.nullable(),
   createdAt: zDateTime,
 });
 export type SpeechAttemptSummary = z.infer<typeof zSpeechAttemptSummary>;
@@ -164,6 +167,8 @@ export const zSpeechAttempt = zSpeechAttemptSummary.extend({
   /** Measured criteria, recomputed by the server from the metrics. */
   measured: z.array(zCriterionResult),
   evaluation: zSpeechEvaluation.nullable(),
+  /** Questions the board asked about this talk. */
+  questions: z.array(z.string()).nullable(),
   rubricVersion: z.number().int(),
   version: zVersion,
   updatedAt: zDateTime,
@@ -177,3 +182,8 @@ export const zSpeechEvaluate = z.object({
 export type SpeechEvaluate = z.infer<typeof zSpeechEvaluate>;
 
 export const zSpeechListQuery = z.object({ topicId: zId.optional() });
+
+export const zSpeechQuestionsRequest = z.object({
+  /** Ask new questions even if the board already asked some. */
+  force: z.boolean().default(false),
+});

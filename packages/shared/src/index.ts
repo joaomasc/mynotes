@@ -27,3 +27,5 @@ export * from './speech/path';
 export * from './speech/content/warmups';
 export * from './speech/content/topics';
 export * from './speech/content/level1';
+export * from './speech/content/level2';
+export * from './speech/content/level3';

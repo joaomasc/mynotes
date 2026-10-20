@@ -6,6 +6,7 @@ import {
   evaluateMeasured,
   speechScore,
   SPEECH_METHODS,
+  SPEECH_TYPE_LABELS,
   calibratedLimits,
   zSpeechEvaluation,
   zSpeechFeedback,
@@ -32,7 +33,16 @@ import { aiConfig, costOf, requireReady } from '../assistant/config';
 import { createResponse, outputText } from '../assistant/openai';
 import { assertWithinBudget, usageStatement } from '../assistant/usage';
 import { speechSettings } from './path';
-import { COACH_INSTRUCTIONS, EVALUATION_SCHEMA, FEEDBACK_INSTRUCTIONS, FEEDBACK_SCHEMA, evaluationMessage, timedTranscript } from './prompt';
+import {
+  BOARD_INSTRUCTIONS,
+  BOARD_SCHEMA,
+  COACH_INSTRUCTIONS,
+  EVALUATION_SCHEMA,
+  FEEDBACK_INSTRUCTIONS,
+  FEEDBACK_SCHEMA,
+  evaluationMessage,
+  timedTranscript,
+} from './prompt';
 
 /* --------------------------------------------------------------- rows -- */
 
@@ -52,6 +62,7 @@ function toSummary(r: Row): SpeechAttemptSummary {
     fillersPerMinute: num(r.fillers_per_minute),
     pvq: numOrNull(r.pvq),
     lessonId: strOrNull(r.lesson_id),
+    parentId: strOrNull(r.parent_id),
     createdAt: str(r.created_at),
   };
 }
@@ -66,6 +77,7 @@ function toAttempt(r: Row): SpeechAttempt {
     metrics: parseJson<SpeechMetrics>(r.metrics_json, {} as SpeechMetrics),
     measured: parseJson<CriterionResult[]>(r.measured_json, []),
     evaluation: parseJson<SpeechEvaluation | null>(r.evaluation_json, null),
+    questions: parseJson<string[] | null>(r.questions_json, null),
     rubricVersion: num(r.rubric_version),
     version: num(r.version),
     updatedAt: str(r.updated_at),
@@ -86,7 +98,7 @@ export async function getAttempt(db: D1Database, userId: string, id: string): Pr
 
 const SORT: SortSpec = { expr: 'started_at', field: 'started_at', dir: 'DESC' };
 const SUMMARY_COLUMNS =
-  'id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds, score, wpm, fillers_per_minute, pvq, lesson_id, created_at, ' +
+  'id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds, score, wpm, fillers_per_minute, pvq, lesson_id, parent_id, created_at, ' +
   'CASE WHEN evaluation_json IS NULL THEN NULL ELSE 1 END AS evaluation_json';
 
 export async function listAttempts(
@@ -129,6 +141,9 @@ export async function createAttempt(
   }
   if (input.mode === 'explain' && !input.topicId) throw badRequest('Escolha o assunto que você vai explicar');
   await assertReference(db, 'topics', input.topicId, userId);
+  if (input.parentId && !(await first(db, 'SELECT 1 AS ok FROM speech_attempts WHERE id = ? AND user_id = ?', input.parentId, userId))) {
+    throw badRequest('A fala de origem não existe');
+  }
   if (input.timeline.db.length !== input.timeline.f0.length) throw badRequest('Linha do tempo inconsistente');
 
   const settings = await speechSettings(db, userId);
@@ -138,8 +153,8 @@ export async function createAttempt(
     db,
     `INSERT INTO speech_attempts (id, user_id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds,
        transcript, words_json, segments_json, timeline_json, metrics_json, measured_json, evaluation_json, score,
-       rubric_version, wpm, fillers_per_minute, pvq, lesson_id, version, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       rubric_version, wpm, fillers_per_minute, pvq, lesson_id, parent_id, version, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     input.id,
     userId,
     input.mode,
@@ -161,6 +176,7 @@ export async function createAttempt(
     input.metrics.fillers.perMinute,
     input.metrics.pitch.pvq,
     input.lessonId,
+    input.parentId,
     now,
     now,
   );
@@ -362,4 +378,58 @@ export async function writtenFeedback(env: Env, userId: string, input: Required<
     console.error(JSON.stringify({ level: 'error', msg: 'speech feedback unusable', status: res.status, error: String(err).slice(0, 200) }));
     throw new ApiError('service_unavailable', 'A correção da IA veio incompleta. Tente de novo.');
   }
+}
+
+/* -------------------------------------------------------------- board -- */
+
+const zQuestions = z.object({ questions: z.array(z.string()) });
+
+/**
+ * The examining board: three fair but hard questions about a talk (one to
+ * clarify, one that challenges an argument, one that asks for an example),
+ * kept with the talk. Counts against the daily budget.
+ */
+export async function boardQuestions(env: Env, userId: string, id: string, input: { force: boolean }): Promise<SpeechAttempt> {
+  const db = env.DB;
+  const row = await attemptRow(db, userId, id);
+  if (row.questions_json != null && !input.force) return toAttempt(row);
+  const attempt = toAttempt(row);
+  if (!attempt.transcript.trim()) throw badRequest('A fala não tem texto para a banca perguntar');
+  const cfg = requireReady(aiConfig(env));
+  const today = nowIso().slice(0, 10);
+  await assertWithinBudget(db, userId, cfg, today);
+  const notes = attempt.mode === 'explain' && attempt.topicId ? await topicNotes(db, userId, attempt.topicId) : [];
+  const message = [
+    `Tipo de fala: ${SPEECH_TYPE_LABELS[attempt.speechType]}.`,
+    attempt.theme ? `Tema: ${attempt.theme}.` : '',
+    'Transcrição:',
+    timedTranscript(attempt.words, attempt.transcript, 8000),
+    ...(notes.length ? ['', 'Notas do estudante sobre o assunto:', ...notes.map((n) => `### ${n.title}\n${n.text}`)] : []),
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const res = await createResponse(cfg, {
+    instructions: BOARD_INSTRUCTIONS,
+    input: [{ role: 'user', content: message }],
+    tools: [],
+    toolChoice: 'none',
+    textFormat: { name: 'board_questions', schema: BOARD_SCHEMA },
+    maxOutputTokens: Math.max(cfg.maxOutputTokens, 1500),
+  });
+  await usageStatement(db, userId, today, res.usage, costOf(res.usage, cfg.prices), 1).run();
+  let questions: string[];
+  try {
+    if (res.status !== 'completed') throw new Error(res.incompleteReason ?? res.status);
+    questions = zQuestions
+      .parse(JSON.parse(outputText(res.output)))
+      .questions.map((q) => q.trim().slice(0, 400))
+      .filter(Boolean)
+      .slice(0, 3);
+    if (questions.length === 0) throw new Error('no questions');
+  } catch (err) {
+    console.error(JSON.stringify({ level: 'error', msg: 'board questions unusable', status: res.status, error: String(err).slice(0, 200) }));
+    throw new ApiError('service_unavailable', 'A banca não conseguiu formular as perguntas. Tente de novo.');
+  }
+  await run(db, 'UPDATE speech_attempts SET questions_json = ?, version = version + 1, updated_at = ? WHERE id = ? AND user_id = ?', JSON.stringify(questions), nowIso(), id, userId);
+  return getAttempt(db, userId, id);
 }

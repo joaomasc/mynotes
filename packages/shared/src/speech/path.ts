@@ -1,5 +1,7 @@
 import type { Challenge, Exercise, ExerciseType, Lesson, Level, Unit } from './curriculum';
 import { LEVEL_1 } from './content/level1';
+import { LEVEL_2 } from './content/level2';
+import { LEVEL_3 } from './content/level3';
 import { DAILY_TOPICS } from './content/topics';
 import { dayIndex } from './content/warmups';
 import type { MethodId } from './methods';
@@ -12,7 +14,7 @@ import { REVIEW_INTERVAL_DAYS, SKILL_MAX_LEVEL, skillLevel, type SkillId } from 
  * the app (which shows).
  */
 
-export const SPEECH_PATH: Level[] = [LEVEL_1];
+export const SPEECH_PATH: Level[] = [LEVEL_1, LEVEL_2, LEVEL_3];
 
 export const PRACTICE_KINDS = ['lesson', 'challenge', 'levelChallenge', 'review', 'warmup', 'daily', 'free'] as const;
 export type PracticeKind = (typeof PRACTICE_KINDS)[number];
@@ -26,6 +28,7 @@ export const EXERCISE_XP: Record<ExerciseType, number> = {
   readAloud: 10,
   articulation: 10,
   shortTalk: 20,
+  qa: 25,
 };
 export const LESSON_BONUS_XP = 10;
 export const CHALLENGE_XP = 40;
@@ -129,8 +132,9 @@ export function learnedMethods(done: CompletedSet, path: Level[] = SPEECH_PATH):
  * and most of the other exercises were right.
  */
 export function lessonPassed(exercises: Exercise[], results: boolean[]): boolean {
-  const talks = exercises.flatMap((e, i) => (e.type === 'shortTalk' ? [results[i] === true] : []));
-  const others = exercises.flatMap((e, i) => (e.type === 'shortTalk' ? [] : [results[i] === true]));
+  const spoken = (e: Exercise) => e.type === 'shortTalk' || e.type === 'qa';
+  const talks = exercises.flatMap((e, i) => (spoken(e) ? [results[i] === true] : []));
+  const others = exercises.flatMap((e, i) => (spoken(e) ? [] : [results[i] === true]));
   const share = others.length ? others.filter(Boolean).length / others.length : 1;
   return talks.every(Boolean) && share >= 0.6;
 }
@@ -249,7 +253,7 @@ export function reviewLesson(skill: SkillId, day: string, done: CompletedSet, pa
     unit.lessons.filter((l) => l.skills.includes(skill) && lessonDone(level, l.id, done)),
   );
   if (taught.length === 0) return null;
-  const pool = taught.flatMap((l) => l.exercises).filter((e) => e.type !== 'concept' && e.type !== 'shortTalk' && e.type !== 'build');
+  const pool = taught.flatMap((l) => l.exercises).filter((e) => e.type !== 'concept' && e.type !== 'shortTalk' && e.type !== 'build' && e.type !== 'qa');
   const talks = taught.flatMap((l) => l.exercises).filter((e): e is Extract<Exercise, { type: 'shortTalk' }> => e.type === 'shortTalk');
   const picked: Exercise[] = [];
   for (let k = 0; k < Math.min(3, pool.length); k++) {

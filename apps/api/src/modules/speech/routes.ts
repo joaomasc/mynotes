@@ -7,6 +7,9 @@ import {
   zSpeechPathState,
   zSpeechPracticeCreate,
   zSpeechPracticeResult,
+  zSpeechQuestionsRequest,
+  zSpeechVariantsQuery,
+  zVariantExercise,
   zPageQuery,
   zSpeechAttempt,
   zSpeechAttemptCreate,
@@ -17,6 +20,7 @@ import {
 import type { ApiApp } from '../../app';
 import { errors, idParam, jsonBody, noContent, ok, okPage, secured } from '../../lib/openapi';
 import { pathState, recordPractice } from './path';
+import { serveVariants } from './variants';
 import * as speech from './service';
 
 const tags = ['Oratória'];
@@ -146,5 +150,33 @@ export function speechRoutes(app: ApiApp) {
       responses: { 200: ok(zSpeechFeedback), ...errors },
     }),
     async (c) => c.json({ data: await speech.writtenFeedback(c.env, c.get('userId'), c.req.valid('json')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/attempts/{id}/questions',
+      tags,
+      summary: 'A banca: três perguntas da IA sobre a fala',
+      description: 'Uma de esclarecimento, uma que desafia um argumento e uma que pede um exemplo. Ficam guardadas com a fala; `force` pede outras. Conta no orçamento diário da IA.',
+      security: secured,
+      request: { params: idParam, body: jsonBody(zSpeechQuestionsRequest) },
+      responses: { 200: ok(zSpeechAttempt), ...errors },
+    }),
+    async (c) => c.json({ data: await speech.boardQuestions(c.env, c.get('userId'), c.req.valid('param').id, c.req.valid('json')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/speech/variants',
+      tags,
+      summary: 'Exercícios extras para revisar uma habilidade (escritos pela IA, cada um entregue uma vez)',
+      description: 'Sem a IA disponível, devolve o que já estiver guardado (talvez nada).',
+      security: secured,
+      request: { query: zSpeechVariantsQuery },
+      responses: { 200: ok(z.array(zVariantExercise)), ...errors },
+    }),
+    async (c) => c.json({ data: await serveVariants(c.env, c.get('userId'), c.req.valid('query').skill) }, 200),
   );
 }

@@ -12,6 +12,7 @@ import {
   reviewLesson,
   warmupFor,
   type Challenge,
+  type Exercise,
   type Lesson,
   type SkillId,
   type SpeechPathState,
@@ -32,15 +33,19 @@ type Playable =
   | { kind: 'lesson' | 'review' | 'warmup'; lesson: Lesson; refId: string | null; title: string; subtitle: string }
   | { kind: 'challenge' | 'levelChallenge'; challenge: Challenge; title: string; subtitle: string };
 
-function resolve(id: string, state: SpeechPathState): Playable | null {
+function resolve(id: string, state: SpeechPathState, extra: Exercise[]): Playable | null {
   if (id === 'warmup') {
     const weakest = dueSkills(state.skills, state.today).map((s) => s.skill);
     return { kind: 'warmup', lesson: { id: 'warmup', title: 'Aquecimento', skills: [], exercises: warmupFor(state.today, weakest) }, refId: null, title: 'Aquecimento vocal', subtitle: '2 minutos para acordar a voz' };
   }
   if (id.startsWith('review-')) {
     const skill = id.slice('review-'.length) as SkillId;
-    const lesson = SKILL_LABELS[skill] ? reviewLesson(skill, state.today, new Set(state.completed)) : null;
-    return lesson ? { kind: 'review', lesson, refId: skill, title: `Revisão: ${SKILL_LABELS[skill]}`, subtitle: 'Exercícios do que você já aprendeu' } : null;
+    const base = SKILL_LABELS[skill] ? reviewLesson(skill, state.today, new Set(state.completed)) : null;
+    if (!base) return null;
+    // Fresh exercises written by the model go before the closing talk.
+    const talk = base.exercises.at(-1)?.type === 'shortTalk' ? base.exercises.slice(-1) : [];
+    const lesson = { ...base, exercises: [...base.exercises.slice(0, base.exercises.length - talk.length), ...extra, ...talk] };
+    return { kind: 'review', lesson, refId: skill, title: `Revisão: ${SKILL_LABELS[skill]}`, subtitle: 'Exercícios do que você já aprendeu' };
   }
   const lesson = findLesson(id);
   if (lesson) return { kind: 'lesson', lesson: lesson.lesson, refId: lesson.lesson.id, title: lesson.lesson.title, subtitle: `Unidade ${lesson.unit.number} · ${lesson.unit.title}` };
@@ -113,10 +118,22 @@ export function Component() {
   const [result, setResult] = useState<SpeechPracticeResult | null>(null);
   const [round, setRound] = useState(0);
   const startedAt = useRef(Date.now());
+  const aiReady = !!ai.data?.enabled && !!ai.data.configured;
+  const reviewSkill = id.startsWith('review-') ? (id.slice('review-'.length) as SkillId) : null;
+  const variants = useQuery({
+    queryKey: ['speech-variants', reviewSkill, round],
+    queryFn: () => endpoints.speech.variants(reviewSkill!),
+    enabled: !!reviewSkill && aiReady,
+    staleTime: Infinity,
+    retry: false,
+  });
+  // A review waits for its extra exercises (or their failure), so it never changes mid-lesson.
+  const waiting = !!reviewSkill && (ai.isPending || (aiReady && !variants.isFetched));
+  const extra = variants.data ?? [];
   // Frozen on first load: the warm-up and reviews must not change under the user mid-lesson.
-  const playable = useMemo(() => (path.data ? resolve(id, path.data) : null), [id, path.data?.today, round]); // eslint-disable-line react-hooks/exhaustive-deps
+  const playable = useMemo(() => (path.data && !waiting ? resolve(id, path.data, extra) : null), [id, path.data?.today, round, waiting]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (path.isPending) return <PageLoader />;
+  if (path.isPending || waiting) return <PageLoader />;
   if (path.isError) return <ErrorState error={path.error} onRetry={() => void path.refetch()} />;
   if (!playable) {
     return (
@@ -125,7 +142,6 @@ export function Component() {
       </Page>
     );
   }
-  const aiReady = !!ai.data?.enabled && !!ai.data.configured;
   const seconds = () => Math.min(3600, Math.round((Date.now() - startedAt.current) / 1000));
 
   const save = async (body: Parameters<typeof practice.mutateAsync>[0]) => {

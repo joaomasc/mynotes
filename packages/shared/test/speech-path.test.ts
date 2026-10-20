@@ -52,8 +52,10 @@ describe('speaking path content', () => {
     expect(nextStep(new Set(['u1-l1', 'u1-l2', 'u1-l3', 'u1-desafio']))).toMatchObject({ kind: 'lesson', lesson: { id: 'u2-l1' } });
     const allUnits = new Set(LEVEL_1.units.map((u) => u.challenge.id));
     expect(nextStep(allUnits)).toMatchObject({ kind: 'levelChallenge' });
-    expect(nextStep(new Set(['n1-desafio']))).toBeNull();
-    expect(pathProgress(new Set(['n1-desafio']))).toBe(1);
+    expect(nextStep(new Set(['n1-desafio']))).toMatchObject({ kind: 'lesson', lesson: { id: 'u6-l1' } });
+    expect(nextStep(new Set(['n1-desafio', 'n2-desafio', 'n3-desafio']))).toBeNull();
+    expect(pathProgress(new Set(['n1-desafio', 'n2-desafio', 'n3-desafio']))).toBe(1);
+    expect(SPEECH_PATH.flatMap((l) => l.units).map((u) => u.number)).toEqual(Array.from({ length: 16 }, (_, i) => i + 1));
     expect(pathProgress(new Set())).toBe(0);
   });
 

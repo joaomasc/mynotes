@@ -214,8 +214,9 @@ Novo módulo `apps/api/src/modules/speech/` (`routes.ts` + `service.ts`), regist
 | `GET speech/attempts`, `GET speech/attempts/{id}`, `DELETE speech/attempts/{id}` | Histórico e detalhe |
 | `POST speech/attempts/{id}/evaluate` | Avaliação de texto pela IA |
 | `POST speech/attempts/{id}/full-evaluation` | Avaliação completa com áudio |
-| `POST speech/exercises/{template}/variants` | Gera e guarda variações de um modelo de exercício |
 | `POST speech/feedback` | Corrige um exercício escrito (“Consertar” e “Construir”) |
+| `POST speech/attempts/{id}/questions` | A banca: três perguntas da IA sobre a fala (guardadas com ela) |
+| `GET speech/variants?skill=` | Até 3 exercícios extras para a revisão de uma habilidade, escritos pela IA em lotes de 6 e entregues uma vez cada |
 | `GET/POST/PATCH speech/projects`, `GET speech/projects/{id}` | Discursos do nível 4 |
 | `POST transcriptions` (existente) | Ganha `detail: "words"` |
 
@@ -296,7 +297,7 @@ No **painel inicial**, um cartão “Oratória” mostra a sequência de dias e 
 |---|---|---|
 | **1. Motor de análise** ✓ | Gravador com opções de captura e fila em IndexedDB; Analisador acústico; transcrição com `detail: "words"`; métricas; régua como dados; tela de resultado; fala livre e “explicar um assunto”; avaliação de texto pela IA; histórico | Uma fala de 2 minutos gera resultado completo e explicado; as gravações de calibração apontam os problemas certos |
 | **2. Calibração e nível 1** ✓ | Linha de base (unidade 1) e ajuste dos limites; conteúdo do nível 1; player de lições com todos os tipos de exercício; XP, meta diária e sequência de dias; aquecimento e Discurso do Dia; cartão no painel | Dá para fazer a sessão diária completa do nível 1 no celular |
-| **3. Níveis 2 e 3** | Conteúdo; biblioteca de métodos; banca de perguntas; níveis de habilidade e lições de revisão; variações geradas pela IA; desafios de nível | A trilha até a unidade 16 funciona com revisões automáticas |
+| **3. Níveis 2 e 3** ✓ | Conteúdo; biblioteca de métodos; banca de perguntas; níveis de habilidade e lições de revisão; variações geradas pela IA; desafios de nível | A trilha até a unidade 16 funciona com revisões automáticas |
 | **4. Discurso próprio** | Nível 4 com projetos ligados a notas; ensaios comparados; avaliação completa com áudio; guardar áudio; lembrete por Web Push | Um discurso vai da ideia à apresentação final dentro do app |
 
 A etapa 1 já é útil sozinha (treino livre com retorno detalhado) e valida a parte mais arriscada, as medições, antes de escrever o conteúdo da trilha.
@@ -328,3 +329,10 @@ A etapa 1 já é útil sozinha (treino livre com retorno detalhado) e valida a p
 - O Discurso do Dia alterna, dia sim dia não, entre um tema geral e uma nota sua (com assunto, a fala é avaliada contra as notas).
 - Correção encontrada no caminho: o backup recusava a configuração `notes` (nota diária); a lista de chaves passou a vir das configurações do app.
 
+**Etapa 3 entregue:**
+
+- Conteúdo dos níveis 2 e 3 (`content/level2.ts`, `content/level3.ts`): 11 unidades, cada uma com três lições e um desafio, e os desafios dos níveis 2 e 3. A trilha tem 16 unidades, 48 lições e 19 desafios.
+- **Banca:** novo tipo de exercício (`qa`), usado na unidade 16 com perguntas escritas à mão, e o botão “Treinar a banca” no resultado de qualquer fala, com perguntas da IA (`/speaking/attempts/:id/banca`). Cada resposta é salva como fala (`speech_type = 'qa'`, `parent_id` apontando a fala original) e avaliada como resposta à pergunta.
+- **Variações da IA nas revisões:** a lição de revisão espera até 3 exercícios extras da habilidade antes de começar; sem IA, segue só com os exercícios da trilha. Itens inválidos do modelo são descartados (`toVariants`).
+- **Biblioteca de métodos** em `/speaking/methods`, mostrando quais já foram aprendidos.
+- Migração `0007_speech_board.sql`: colunas `parent_id` e `questions_json` em `speech_attempts` e a tabela `speech_exercise_variants` (fora do backup, por ser regenerável).

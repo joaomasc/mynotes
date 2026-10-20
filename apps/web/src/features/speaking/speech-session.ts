@@ -40,6 +40,8 @@ export interface SpeechSetup {
   themeWords: string[];
   /** The lesson or challenge the talk belongs to. */
   lessonId?: string | null;
+  /** For an answer to the board: the talk the question was about. */
+  parentId?: string | null;
 }
 
 /** A talk measured but not saved (short exercises: reading aloud, tongue twisters). */
@@ -404,6 +406,7 @@ export class SpeechSession {
           topicId: talk.setup.topicId,
           theme: talk.setup.theme,
           lessonId: talk.setup.lessonId ?? null,
+          parentId: talk.setup.parentId ?? null,
           startedAt: talk.startedAt,
           localDay: talk.localDay,
           transcript: recording.transcript,

@@ -28,6 +28,7 @@ import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
 import { qk } from '@/lib/query';
 import { clock } from './speaking-ui';
+import type { SpeechSetup } from './speech-session';
 import { TalkRecorder } from './talk-recorder';
 import { resolveTopic } from './use-speech-path';
 
@@ -414,14 +415,31 @@ export interface TalkSpec {
 }
 
 /** Record a talk with goals: saved as a talk, evaluated by the model when a goal needs it. */
-export function TalkCard({ spec, lessonId, state, onDone, doneLabel }: { spec: TalkSpec; lessonId: string; state: SpeechPathState | undefined; onDone: Done; doneLabel?: string }) {
+export function TalkCard({
+  spec,
+  lessonId,
+  state,
+  onDone,
+  doneLabel,
+  setupOverride,
+}: {
+  spec: TalkSpec;
+  lessonId: string | null;
+  state: SpeechPathState | undefined;
+  onDone: Done;
+  doneLabel?: string;
+  /** Board answers keep the subject of the talk they answer (and point to it). */
+  setupOverride?: Partial<SpeechSetup>;
+}) {
   const ai = useQuery({ queryKey: qk.aiStatus, queryFn: endpoints.ai.status, staleTime: 60_000 });
   const aiReady = !!ai.data?.enabled && !!ai.data.configured;
   const [attempt, setAttempt] = useState<SpeechAttempt | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [round, setRound] = useState(0);
   const asked = useRef<string | null>(null);
-  const { text, setup } = resolveTopic(spec.topic, state);
+  const resolved = resolveTopic(spec.topic, state);
+  const text = resolved.text;
+  const setup = { ...resolved.setup, ...setupOverride };
   const method = spec.method && spec.method in SPEECH_METHODS ? SPEECH_METHODS[spec.method as keyof typeof SPEECH_METHODS] : null;
 
   useEffect(() => {
@@ -441,7 +459,7 @@ export function TalkCard({ spec, lessonId, state, onDone, doneLabel }: { spec: T
       <p className="text-xs font-medium tracking-wide text-muted uppercase">Fale · {clock(spec.seconds)}</p>
       <h2 className="text-lg font-semibold text-balance">{spec.instruction}</h2>
       <Card className="p-4">
-        <p className="text-xs text-muted">Tema</p>
+        <p className="text-xs text-muted">{spec.speechType === 'qa' ? 'Pergunta' : 'Tema'}</p>
         <p className="mt-0.5 font-medium">{text}</p>
         {method && (
           <ol className="mt-3 space-y-1 border-t border-border pt-3 text-sm">
@@ -504,6 +522,66 @@ export function TalkCard({ spec, lessonId, state, onDone, doneLabel }: { spec: T
   );
 }
 
+/* --------------------------------------------------------------- board -- */
+
+/** The examining board: one question at a time, each answered out loud and checked against the goals. */
+export function QaCard({
+  instruction,
+  questions,
+  seconds,
+  goals,
+  lessonId,
+  state,
+  setupOverride,
+  onDone,
+}: {
+  instruction: string;
+  questions: string[];
+  seconds: number;
+  goals: SpeechGoal[];
+  lessonId: string | null;
+  state: SpeechPathState | undefined;
+  setupOverride?: Partial<SpeechSetup>;
+  onDone: Done;
+}) {
+  const [index, setIndex] = useState(0);
+  const [results, setResults] = useState<ExerciseOutcome[]>([]);
+  if (index >= questions.length) {
+    const ok = results.filter((r) => r.passed).length;
+    const passed = ok >= Math.ceil(questions.length / 2);
+    return (
+      <div className="space-y-4">
+        <Feedback ok={passed}>
+          <p className="font-medium">
+            {ok} de {questions.length} respostas cumpriram as metas.
+          </p>
+          <p className="mt-1 text-muted">{passed ? 'A banca ficou satisfeita.' : 'Vale treinar de novo: responda na primeira frase e depois explique.'}</p>
+        </Feedback>
+        <Continue onClick={() => onDone({ passed, attemptId: results.at(-1)?.attemptId })} />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <p className="text-xs font-medium tracking-wide text-muted uppercase">
+        Banca · pergunta {index + 1} de {questions.length}
+      </p>
+      <TalkCard
+        key={index}
+        spec={{ instruction, topic: { text: questions[index]! }, seconds, goals, speechType: 'qa' }}
+        lessonId={lessonId}
+        state={state}
+        setupOverride={setupOverride}
+        doneLabel={index + 1 < questions.length ? 'Próxima pergunta' : 'Concluir a banca'}
+        onDone={(o) => {
+          setResults((r) => [...r, o]);
+          setIndex((i) => i + 1);
+        }}
+      />
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ dispatch -- */
 
 export function ExerciseCard({ exercise, lessonId, state, aiReady, onDone }: { exercise: Exercise; lessonId: string; state: SpeechPathState | undefined; aiReady: boolean; onDone: Done }) {
@@ -522,5 +600,7 @@ export function ExerciseCard({ exercise, lessonId, state, aiReady, onDone }: { e
       return <ReadCard e={exercise} onDone={onDone} />;
     case 'shortTalk':
       return <TalkCard spec={exercise} lessonId={lessonId} state={state} onDone={onDone} />;
+    case 'qa':
+      return <QaCard instruction={exercise.instruction} questions={exercise.questions} seconds={exercise.seconds} goals={exercise.goals} lessonId={lessonId} state={state} onDone={onDone} />;
   }
 }
