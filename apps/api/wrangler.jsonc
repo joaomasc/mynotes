@@ -73,7 +73,10 @@
     // (developers.openai.com/api/docs/pricing, checked 2026-10-20), counted in the daily budget.
     "AI_WEB_SEARCH": "true",
     "AI_MAX_WEB_SEARCHES": "5",
-    "AI_PRICE_WEB_SEARCH_PER_CALL": "0.01"
+    "AI_PRICE_WEB_SEARCH_PER_CALL": "0.01",
+    // Speaking reminders (Web Push). The private key is the secret VAPID_PRIVATE_KEY.
+    "VAPID_PUBLIC_KEY": "BItuKPO8F_rt07iLjck0Yb5mb9MQlnI_PcJHZ4kmoWhzmTObUPg-3kqo-5W7Ha5JYijqclVL0pK5V9MmnSWixcs",
+    "VAPID_SUBJECT": "https://mynotes-web.joaomasc-dev.workers.dev"
   }
   // Secrets (never commit): AUTH_SECRET — set with `wrangler secret put AUTH_SECRET`;
   // OPENAI_API_KEY — set with `wrangler secret put OPENAI_API_KEY` (locally: apps/api/.dev.vars).
