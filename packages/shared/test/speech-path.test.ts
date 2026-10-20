@@ -24,6 +24,7 @@ import {
   reviewLesson,
   warmupFor,
   type AcousticFrame,
+  type SkillState,
   type SpeechWord,
 } from '../src';
 
@@ -96,7 +97,7 @@ describe('streak', () => {
 
 describe('skills and reviews', () => {
   it('levels up with practice and schedules the next review', () => {
-    let s = { skill: 'fillers' as const, xp: 0, level: 0, lastPracticedOn: null, nextReviewOn: null };
+    let s: SkillState = { skill: 'fillers', xp: 0, level: 0, lastPracticedOn: null, nextReviewOn: null };
     s = practiceSkill(s, true, '2026-10-20');
     expect(s).toMatchObject({ xp: 10, level: 0, nextReviewOn: '2026-10-21' });
     s = practiceSkill(s, true, '2026-10-21');
