@@ -33,7 +33,7 @@ export function DailyColumns({ stats, from, days }: { stats: StudyStats; from: D
             <button
               key={d.date}
               type="button"
-              className="group relative flex h-full flex-1 items-end justify-center focus-visible:outline-none"
+              className="group relative flex h-full min-w-0 flex-1 items-end justify-center focus-visible:outline-none"
               onMouseEnter={() => setHover(i)}
               onFocus={() => setHover(i)}
               onBlur={() => setHover(null)}
@@ -41,7 +41,8 @@ export function DailyColumns({ stats, from, days }: { stats: StudyStats; from: D
             >
               <span
                 className={cn('block rounded-t-[4px] bg-accent transition-opacity', hover !== null && hover !== i && 'opacity-50')}
-                style={{ height: h, width: barWidth }}
+                // Narrower on small screens, never wider than the bar.
+                style={{ height: h, width: '100%', maxWidth: barWidth }}
               />
             </button>
           );

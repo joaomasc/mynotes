@@ -48,6 +48,15 @@ test('mind map: a click lights the chain of connections and "Abrir" keeps the ma
   await expect(panes(page)).toHaveCount(2);
   await expect(panes(page).nth(1).getByRole('heading', { level: 1 })).toContainText('Neto F');
   await expect(panes(page).nth(0).locator('.react-flow')).toBeVisible();
+
+  // Another item opens on the same side, in a new tab (the first one stays there).
+  await panes(page).nth(0).locator('.react-flow').getByText('Filho F', { exact: true }).click();
+  await page.getByRole('complementary', { name: 'Item selecionado' }).getByRole('button', { name: /Abrir ao lado/ }).click();
+  await expect(panes(page)).toHaveCount(2);
+  await expect(panes(page).nth(1).getByRole('heading', { level: 1 })).toContainText('Filho F');
+  const sideTabs = panes(page).nth(1).getByRole('tablist', { name: 'Abas' }).getByRole('tab');
+  await expect(sideTabs).toHaveCount(2);
+  await expect(sideTabs.filter({ hasText: 'Neto F' })).toHaveCount(1);
 });
 
 test('maximized PDF with the annotations beside it, following the page being read', async ({ page }) => {
@@ -77,8 +86,22 @@ test('maximized PDF with the annotations beside it, following the page being rea
   await expect(side.getByRole('button', { name: 'Anotar a p. 3' })).toBeVisible({ timeout: 15_000 });
   await side.getByRole('button', { name: 'Anotar a p. 3' }).click();
   await expect(side.getByRole('textbox', { name: 'Conteúdo da nota' })).toBeFocused();
-  await page.keyboard.type('Nota ao lado do PDF');
-  await page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok() && (r.request().postData() ?? '').includes('Nota ao lado'));
+  await page.keyboard.type('Nota ao lado do PDF, ver /pagina.livro f');
+  // The "/" menu floats over the page (outside the pane).
+  await page.getByRole('option', { name: /Escolher a página/ }).click();
+  await page.keyboard.type('1');
+  await expect(page.getByRole('option', { name: /Livro F, p\. 1.*Página do livro/ })).toBeVisible();
+  await expect(page.getByRole('listbox')).toHaveAttribute('aria-busy', 'false');
+  const citationSaved = page.waitForResponse((r) => r.request().method() === 'PATCH' && r.ok() && (r.request().postData() ?? '').includes('/p/1'));
+  await page.keyboard.press('Enter');
+  await citationSaved;
+
+  // A citation of a page of this book, clicked beside, moves the PDF that is already open (nothing opens over the notes).
+  await side.locator('.ProseMirror').getByText('Livro F, p. 1').click();
+  await expect(side.getByRole('button', { name: 'Anotar a p. 1' })).toBeVisible({ timeout: 15_000 });
+  await expect(panes(page)).toHaveCount(2);
+  await expect(side.locator('.pdf-page')).toHaveCount(0);
+  await expect(reader.locator('.pdf-page')).toHaveCount(3);
 
   // Restoring brings the annotations back next to the PDF and closes the pane.
   await reader.getByRole('button', { name: 'Restaurar' }).click();

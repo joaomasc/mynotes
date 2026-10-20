@@ -90,7 +90,7 @@ export function Component() {
       ) : !maps.data?.length ? (
         <EmptyState icon={<Network />} title="Nenhum mapa mental" description="Comece por um tema central e desdobre em ideias." action={<Button variant="outline" onClick={startNew}>Criar mapa</Button>} />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {maps.data.map((m) => (
             <Link key={m.id} to={`/maps/${m.id}`} className="rounded-xl border border-border bg-surface p-4 hover:border-border-strong">
               <div className="flex items-center gap-2">

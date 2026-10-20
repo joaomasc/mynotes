@@ -54,7 +54,7 @@ export function Component() {
           action={status === 'active' ? <Button variant="outline" onClick={() => setCreating(true)}>Criar plano</Button> : undefined}
         />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((p) => {
             const pct = p.itemCount ? (p.completedCount / p.itemCount) * 100 : 0;
             const late = p.status === 'active' && !!p.targetOn && p.targetOn < todayIso();

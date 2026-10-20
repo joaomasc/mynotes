@@ -53,7 +53,7 @@ function ItemDialog({ plan, item, open, onOpenChange }: { plan: PlanDetail; item
     >
       <div className="space-y-4">
         <Field label="Etapa">{(p) => <Input {...p} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus placeholder="Ex.: Ler capítulos 1 a 3" />}</Field>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Prazo" optional>{(p) => <Input {...p} type="date" value={form.dueOn} onChange={(e) => setForm({ ...form, dueOn: e.target.value })} />}</Field>
           <Field label="Leitura" optional>
             {(p) => (
@@ -231,7 +231,7 @@ export function Component() {
             onChange={(e) => setQuick(e.target.value)}
             placeholder="Adicionar etapa e pressionar Enter"
             aria-label="Nova etapa"
-            className="h-9 flex-1 bg-transparent text-base outline-none placeholder:text-subtle sm:text-sm"
+            className="h-9 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-subtle sm:text-sm"
           />
           <Button size="sm" variant="ghost" onClick={() => setItemDialog({ item: null })}>
             Com detalhes

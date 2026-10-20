@@ -109,7 +109,7 @@ function RevisionsDialog({
       ) : !list.data?.length ? (
         <EmptyState icon={<FileClock />} title="Ainda não há versões anteriores" description="Elas aparecem conforme a nota é editada ao longo do tempo." />
       ) : (
-        <div className="grid gap-4 md:grid-cols-[220px_1fr]">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
           <ul className="space-y-1 md:max-h-[60vh] md:overflow-y-auto">
             {list.data.map((r) => (
               <li key={r.id}>

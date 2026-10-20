@@ -8,7 +8,7 @@ import { Menu } from '@/components/ui/menu';
 import { cn } from '@/lib/cn';
 import { ENTITY_CSS_VAR } from '@/lib/entities';
 import { referencePath, refSyntax, useReference } from '@/lib/references';
-import { openModeOf, openPath } from '../../workspace/store';
+import { openModeOf, openPath, workspace } from '../../workspace/store';
 import { EntityPicker } from '../../shared/entity-picker';
 
 /** URL fragment of a heading: lowercase, no accents, words joined by "-". */
@@ -111,6 +111,8 @@ function ReferenceView({ node, editor, getPos, updateAttributes, deleteNode, sel
         e.stopPropagation();
         if (!path) return;
         const mode = openModeOf(e);
+        // A book already open in another tab (its PDF beside this note) goes to the page there.
+        if (mode === 'same' && workspace.showInOpenBook(path)) return;
         if (mode === 'same') void navigate(path);
         else openPath(path, mode);
       }}

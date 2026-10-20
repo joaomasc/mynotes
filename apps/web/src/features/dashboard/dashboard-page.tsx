@@ -37,7 +37,7 @@ function Onboarding() {
     <Card className="p-5 sm:p-6">
       <h2 className="font-semibold">Comece por aqui</h2>
       <p className="mt-1 text-sm text-muted">Seu espaço está vazio. Estes são bons primeiros passos:</p>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {steps.map((s) => {
           const content = (
             <>
@@ -97,7 +97,7 @@ export function Component() {
       </header>
 
       {isLoading ? (
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <Skeleton className="h-40 lg:col-span-3" />
           <Skeleton className="h-64 lg:col-span-2" />
           <Skeleton className="h-64" />
@@ -130,7 +130,7 @@ export function Component() {
             </Section>
           )}
 
-          <div className="grid gap-8 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
             <div className="space-y-8 lg:col-span-2">
               <Section title="Notas recentes" action={<Link to="/notes" className="text-xs text-accent hover:underline">Ver todas</Link>}>
                 {data.recentNotes.length === 0 ? (
@@ -157,7 +157,7 @@ export function Component() {
 
               {(data.readingsInProgress.length > 0 || data.overdueReadings.length > 0) && (
                 <Section title="Leituras" action={<Link to="/library" className="text-xs text-accent hover:underline">Ver biblioteca</Link>}>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {data.readingsInProgress.map((r) => (
                       <Link key={r.id} to={`/readings/${r.id}`} className="rounded-xl border border-border bg-surface p-4 hover:border-border-strong">
                         <div className="flex items-start gap-2">

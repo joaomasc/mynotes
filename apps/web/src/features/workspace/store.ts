@@ -321,12 +321,47 @@ class Workspace {
     if (!this.enabled) return this.fallbackNavigate?.(path);
     const beside = this.paneBeside(fromPaneId);
     if (!beside) return this.openSplit(path, 'row', { paneId: fromPaneId, keepActive: true });
-    const tab = beside.tabs.find((t) => t.id === beside.active) ?? beside.tabs[0]!;
-    if (tab.pinned) {
-      const opened = newTab(path);
-      return this.updatePane(beside.id, (p) => ({ ...p, tabs: [...p.tabs, opened], active: opened.id }));
+    // Each item gets a tab of its own on that side (one already showing it is just brought to the front).
+    const existing = beside.tabs.find((t) => t.path === path);
+    const opened = existing ?? newTab(path);
+    this.updatePane(beside.id, (p) => {
+      if (existing) return { ...p, active: existing.id };
+      const at = p.tabs.findIndex((t) => t.id === p.active);
+      const tabs = [...p.tabs];
+      tabs.splice(at < 0 ? tabs.length : at + 1, 0, opened);
+      return { ...p, tabs, active: opened.id };
+    });
+  }
+
+  /**
+   * A link to a book (a page, an annotation, the review) while that book is
+   * already open in another tab — e.g. its PDF maximized beside the notes:
+   * that tab goes there instead of the current page being left. Returns
+   * whether it was handled.
+   */
+  showInOpenBook(path: string): boolean {
+    if (!this.enabled) return false;
+    const pathname = path.split(/[?#]/)[0]!;
+    if (!/^\/readings\/[^/]+$/.test(pathname)) return false;
+    const active = this.activeTab();
+    if (active.path.split(/[?#]/)[0] === pathname) return false;
+    for (const pane of allPanes(this.state.root)) {
+      const tab = pane.tabs.find((t) => t.path.split(/[?#]/)[0] === pathname);
+      if (!tab) continue;
+      if (pane.id === this.state.activePane) {
+        // Same pane as the current page: navigate first, then bring it to the front
+        // (the browser URL then follows a tab already at its new place).
+        void tabRouter(tab)
+          .navigate(path)
+          .then(() => this.activate(tab.id));
+      } else {
+        // Another pane (the PDF beside): shown there, the focus stays where it is.
+        if (pane.active !== tab.id) this.updatePane(pane.id, (p) => ({ ...p, active: tab.id }));
+        void tabRouter(tab).navigate(path);
+      }
+      return true;
     }
-    void tabRouter(tab).navigate(path);
+    return false;
   }
 
   activate(tabId: string) {
@@ -556,6 +591,7 @@ export function openModeOf(e: { ctrlKey: boolean; metaKey: boolean; altKey: bool
 
 /** Opens an app path; without the workspace (phone layout) everything opens in place. */
 export function openPath(path: string, mode: OpenMode = 'same'): void {
+  if (mode === 'same' && workspace.showInOpenBook(path)) return;
   if (!workspace.enabled || mode === 'same') {
     if (workspace.enabled) workspace.navigateActive(path);
     else workspace.fallbackNavigate?.(path);

@@ -75,7 +75,7 @@ export function Component() {
           </Button>
         }
       />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         <Card className="space-y-4 p-5">
           <Field label="Nome">{(p) => <Input {...p} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={200} />}</Field>
           <Field label="Assunto" optional>{(p) => <TopicSelect {...p} value={form.topicId} onChange={(topicId) => setForm({ ...form, topicId })} emptyLabel="Sem assunto" />}</Field>

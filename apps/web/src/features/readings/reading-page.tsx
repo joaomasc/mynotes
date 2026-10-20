@@ -41,7 +41,7 @@ import { RelationsPanel } from '../shared/relations-panel';
 import { TopicBreadcrumb, TopicChip } from '../shared/topic-breadcrumb';
 import { useRecordView } from '../shared/use-view';
 import { workspace } from '../workspace/store';
-import { usePane } from '../workspace/tab-info';
+import { usePane, useWideView } from '../workspace/tab-info';
 import { readerSync, useReaderSync } from './reader-sync';
 import { ProgressDialog, ReadingFormDialog, invalidateReadings, readingPercent } from './reading-dialogs';
 
@@ -624,6 +624,7 @@ export function Component() {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const pane = usePane();
+  const wide = useWideView(960);
   const sync = useReaderSync(id);
   const [maximized, setMaximized] = useLocalPreference('mynotes:reader-maximized', false);
   const [dialog, setDialog] = useState<'edit' | 'progress' | null>(null);
@@ -676,8 +677,12 @@ export function Component() {
       setTab('annotations');
     }
     if (params.get('section') === 'review') setTab('review');
+    // The annotations may be open beside the PDF: they show it there.
+    if (annotation || page || params.get('section') === 'review') {
+      readerSync.set(id, { focus: { section: params.get('section') === 'review' ? 'review' : 'annotations', annotation, seq: Date.now() } });
+    }
     setParams({}, { replace: true });
-  }, [params, setParams]);
+  }, [params, setParams, id]);
 
   /** Marks on the PDF pages: annotations plus notes that cite the page. */
   const markers = useMemo(() => {
@@ -761,6 +766,8 @@ export function Component() {
 
   // Maximized: the PDF takes the whole tab and the annotations open in a pane beside it.
   const besideOpen = !!pane && sync.panels > 0;
+  // PDF and annotations side by side only when there is room for both (the pane's width, not the screen's: a tablet in landscape has the sidebar).
+  const sideBySide = wide && !besideOpen;
   const openBeside = () => pane && workspace.openBeside(readingPanelPath(id), pane.paneId);
   const maximize = () => {
     setMaximized(true);
@@ -829,11 +836,11 @@ export function Component() {
           <TopicBreadcrumb topicId={r.topicId} />
         </div>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-[1_1_16rem]">
             <h1 className="text-[1.5rem] leading-tight font-semibold tracking-tight text-balance">{r.title}</h1>
             {r.author && <p className="mt-0.5 text-sm text-muted">{r.author}</p>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <FavoriteButton type="reading" id={r.id} />
             <Menu
               label="Mais ações"
@@ -865,8 +872,8 @@ export function Component() {
       </header>
 
       {hasPdf && doc.data ? (
-        <div className={cn('grid gap-5', !besideOpen && 'lg:grid-cols-[minmax(0,1fr)_minmax(340px,420px)]')}>
-          <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+        <div className={cn('grid grid-cols-1 gap-5', sideBySide && 'grid-cols-[minmax(0,1fr)_minmax(340px,420px)]')}>
+          <div className={cn('min-w-0', sideBySide && 'sticky top-4 self-start')}>
             <Reader doc={doc.data} reading={r} goto={goto} markers={markers} onPage={onPage} onSelection={select} />
           </div>
           {/* Already open beside: not shown twice. */}

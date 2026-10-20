@@ -19,11 +19,12 @@ export function PageHeader({
     <header className={cn('mb-6', className)}>
       {above && <div className="mb-2">{above}</div>}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+        {/* At least ~16rem for the title: when the actions don't fit beside it, they go below (instead of squeezing it). */}
+        <div className="min-w-0 flex-[1_1_16rem]">
           <h1 className="text-[1.5rem] leading-tight font-semibold tracking-tight text-balance sm:text-[1.75rem]">{title}</h1>
           {subtitle && <div className="mt-1 text-sm text-muted">{subtitle}</div>}
         </div>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+        {actions && <div className="flex min-w-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
     </header>
   );

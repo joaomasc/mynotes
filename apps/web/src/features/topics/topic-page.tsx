@@ -105,7 +105,7 @@ function Books({ context, onNew }: { context: TopicContext | undefined; onNew: (
       {readings.length === 0 ? (
         <p className="text-sm text-muted">Nenhum livro ligado a este assunto. Adicione um ou relacione um livro existente.</p>
       ) : (
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {readings.map((r) => (
             <Link key={r.id} to={`/readings/${r.id}`} className="flex gap-3 rounded-xl border border-border bg-surface p-3 hover:border-border-strong">
               <BookOpen className="mt-0.5 size-4 shrink-0 text-reading" aria-hidden />
@@ -268,11 +268,11 @@ export function Component() {
         }
       />
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-8">
           <Section title={`${depth === 0 ? 'Matérias' : 'Subassuntos'}${children.length ? ` (${children.length})` : ''}`}>
             {children.length > 0 && (
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {children.map((c) => (
                   <Link key={c.id} to={`/topics/${c.id}`} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 hover:border-border-strong">
                     <span className="size-2.5 shrink-0 rounded-full" style={{ background: c.color ?? 'var(--border-strong)' }} aria-hidden />

@@ -73,11 +73,11 @@ export function PlanFormDialog({ open, onOpenChange, plan }: { open: boolean; on
         <Field label="Meta" optional hint="O que você quer alcançar ao final do plano.">
           {(p) => <Input {...p} value={form.goal} onChange={(e) => set('goal', e.target.value)} maxLength={2000} />}
         </Field>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Início" optional>{(p) => <Input {...p} type="date" value={form.startOn ?? ''} onChange={(e) => set('startOn', e.target.value || null)} />}</Field>
           <Field label="Data-alvo" optional>{(p) => <Input {...p} type="date" value={form.targetOn ?? ''} onChange={(e) => set('targetOn', e.target.value || null)} />}</Field>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Assunto" optional>{(p) => <TopicSelect {...p} value={form.topicId} onChange={(v) => set('topicId', v)} emptyLabel="Sem assunto" />}</Field>
           {plan && (
             <Field label="Situação">

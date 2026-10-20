@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { BookOpen } from 'lucide-react';
@@ -26,6 +26,16 @@ export function Component() {
     queryFn: () => endpoints.documents.get(r!.documentId!),
     enabled: !!r?.documentId,
   });
+
+  // A link to an annotation or the review, followed in the book's tab, shows it here.
+  const lastFocus = useRef(sync.focus?.seq);
+  useEffect(() => {
+    const f = sync.focus;
+    if (!f || f.seq === lastFocus.current) return;
+    lastFocus.current = f.seq;
+    setTab(f.section);
+    if (f.annotation) setActiveId(f.annotation);
+  }, [sync.focus]);
 
   // The PDF knows its annotations are open here (and doesn't show them twice).
   useEffect(() => {

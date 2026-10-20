@@ -14,9 +14,11 @@ export interface ReaderSync {
   goto: { page: number; seq: number } | null;
   /** Annotation panels open beside the PDF. */
   panels: number;
+  /** Section or annotation a link asked the book for, shown by the panel beside (seq: one per request). */
+  focus: { section: 'annotations' | 'review'; annotation: string | null; seq: number } | null;
 }
 
-const EMPTY: ReaderSync = { page: null, selection: null, goto: null, panels: 0 };
+const EMPTY: ReaderSync = { page: null, selection: null, goto: null, panels: 0, focus: null };
 const states = new Map<string, ReaderSync>();
 const listeners = new Set<() => void>();
 

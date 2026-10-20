@@ -217,7 +217,7 @@ export function Component() {
           </>
         }
       />
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">{doc.status === 'ready' ? <Preview doc={doc} /> : <PendingUpload doc={doc} />}</div>
         <aside className="space-y-4">
           {doc.description && (

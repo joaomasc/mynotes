@@ -133,7 +133,7 @@ export function ReadingFormDialog({
         }}
       >
         <Field label="Título">{(p) => <Input {...p} value={form.title} onChange={(e) => set('title', e.target.value)} autoFocus required maxLength={300} />}</Field>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Autor" optional>{(p) => <Input {...p} value={form.author} onChange={(e) => set('author', e.target.value)} />}</Field>
           <Field label="Tipo">
             {(p) => (
@@ -180,12 +180,12 @@ export function ReadingFormDialog({
         </button>
         {more && (
           <div className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field label="Início" optional>{(p) => <Input {...p} type="date" value={form.startedOn ?? ''} onChange={(e) => set('startedOn', e.target.value || null)} />}</Field>
               <Field label="Conclusão" optional>{(p) => <Input {...p} type="date" value={form.completedOn ?? ''} onChange={(e) => set('completedOn', e.target.value || null)} />}</Field>
               <Field label="Prazo" optional>{(p) => <Input {...p} type="date" value={form.dueOn ?? ''} onChange={(e) => set('dueOn', e.target.value || null)} />}</Field>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Assunto" optional>{(p) => <TopicSelect {...p} value={form.topicId} onChange={(v) => set('topicId', v)} emptyLabel="Sem assunto" />}</Field>
               <Field label="Prioridade">
                 {(p) => (

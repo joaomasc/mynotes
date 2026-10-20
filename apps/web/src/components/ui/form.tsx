@@ -126,7 +126,8 @@ export function Segmented<T extends string>({
   size?: 'sm' | 'md';
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg bg-surface-2 p-0.5">
+    // On narrow screens the options keep one line each and the group scrolls sideways.
+    <div role="radiogroup" aria-label={label} className="scrollbar-none inline-flex max-w-full overflow-x-auto rounded-lg bg-surface-2 p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -136,7 +137,7 @@ export function Segmented<T extends string>({
           title={o.title}
           onClick={() => onChange(o.value)}
           className={cn(
-            'inline-flex items-center gap-1.5 rounded-md font-medium transition-colors',
+            'inline-flex shrink-0 items-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-colors',
             size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3 text-[13px]',
             value === o.value ? 'bg-surface text-text shadow-sm' : 'text-muted hover:text-text',
           )}

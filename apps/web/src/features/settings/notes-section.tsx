@@ -36,7 +36,7 @@ export function NotesSection() {
         <Field label="Assunto dos modelos" hint="As notas deste assunto aparecem em “Inserir modelo”. Use {{data}}, {{hora}}, {{titulo}} e {{assunto}} no texto.">
           {(p) => <TopicSelect {...p} value={draft.templatesTopicId} onChange={(templatesTopicId) => setDraft({ ...draft, templatesTopicId })} emptyLabel="Nenhum" />}
         </Field>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Assunto das notas diárias" hint="Onde “Abrir a nota diária” (Alt+Shift+D) cria a nota do dia.">
             {(p) => <TopicSelect {...p} value={draft.dailyTopicId} onChange={(dailyTopicId) => setDraft({ ...draft, dailyTopicId })} emptyLabel="Sem assunto" />}
           </Field>

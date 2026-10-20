@@ -177,12 +177,13 @@ function useLinkInterception() {
     };
     const onClick = (e: MouseEvent) => {
       const mode = openModeOf(e);
-      if (mode === 'same') return;
       const path = target(e);
       if (!path) return;
+      // A plain click on a link to a book already open in another tab: that tab goes there.
+      if (mode === 'same' && (e.button !== 0 || !workspace.showInOpenBook(path))) return;
       e.preventDefault();
       e.stopPropagation();
-      openPath(path, mode);
+      if (mode !== 'same') openPath(path, mode);
     };
     const onAux = (e: MouseEvent) => {
       if (e.button !== 1) return;

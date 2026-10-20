@@ -424,7 +424,7 @@ function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
   ]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange} title="Atalhos de teclado" size="lg">
-      <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
         {[...groups].map(([group, rows]) => (
           <section key={group}>
             <h3 className="mb-1 text-xs font-semibold tracking-wide text-subtle uppercase">{group}</h3>
