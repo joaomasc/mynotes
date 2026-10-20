@@ -170,6 +170,34 @@ export const zAiUsageDay = z.object({
 });
 export type AiUsageDay = z.infer<typeof zAiUsageDay>;
 
+/** Semantic index of notes, topics, books, documents and concepts (derived, rebuildable). */
+export const zAiIndexStatus = z.object({
+  /** Vectorize and Workers AI respond (false in local development without remote bindings). */
+  available: z.boolean(),
+  model: z.string(),
+  /** Items embedded with the current model. */
+  indexed: z.number().int(),
+  /** Items that can be indexed. */
+  total: z.number().int(),
+});
+export type AiIndexStatus = z.infer<typeof zAiIndexStatus>;
+
+export const zAiIndexSyncRequest = z.object({
+  /** Forget what was indexed and embed everything again (in batches). */
+  reset: z.boolean().default(false),
+  /** Skip notes edited in the last 2 minutes (background runs). */
+  settle: z.boolean().default(false),
+});
+
+export const zAiIndexSync = zAiIndexStatus.extend({
+  /** Items processed in this call. */
+  processed: z.number().int(),
+  removed: z.number().int(),
+  /** More changes are waiting: call again. */
+  more: z.boolean(),
+});
+export type AiIndexSync = z.infer<typeof zAiIndexSync>;
+
 export const zAiStatus = z.object({
   /** AI_ENABLED is not "false". */
   enabled: z.boolean(),

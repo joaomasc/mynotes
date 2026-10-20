@@ -66,6 +66,8 @@ export class SourceCollector {
 
 export interface ToolContext {
   db: D1Database;
+  /** Workers AI and Vectorize (semantic search); never D1 directly — use `db`. */
+  env: Env;
   userId: string;
   conversationId: string;
   /** Item the user is looking at (already verified). */

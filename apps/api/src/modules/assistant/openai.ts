@@ -116,17 +116,7 @@ function toApiError(status: number, body: { error?: { code?: string; type?: stri
  * rate limits (not quota errors) before any output. Timeouts are not retried.
  */
 export async function createResponse(cfg: AiConfig & { apiKey: string }, req: ResponsesRequest): Promise<ResponsesResult> {
-  const body = JSON.stringify({
-    model: cfg.model,
-    instructions: req.instructions,
-    input: req.input,
-    tools: req.tools,
-    tool_choice: req.toolChoice,
-    parallel_tool_calls: true,
-    max_output_tokens: cfg.maxOutputTokens,
-    ...(cfg.reasoningEffort ? { reasoning: { effort: cfg.reasoningEffort } } : {}),
-    store: false,
-  });
+  const body = requestBody(cfg, req, false);
 
   for (let attempt = 0; ; attempt++) {
     let res: Response;
@@ -145,22 +135,7 @@ export async function createResponse(cfg: AiConfig & { apiKey: string }, req: Re
         timeout ? 'A OpenAI demorou demais para responder. Tente de novo.' : 'Não foi possível conectar à OpenAI agora.',
       );
     }
-    if (res.ok) {
-      const data = (await res.json()) as {
-        id?: string;
-        status?: string;
-        output?: OutputItem[];
-        usage?: unknown;
-        incomplete_details?: { reason?: string } | null;
-      };
-      return {
-        id: data.id ?? '',
-        status: data.status ?? 'completed',
-        output: Array.isArray(data.output) ? data.output : [],
-        usage: readUsage(data.usage),
-        incompleteReason: data.incomplete_details?.reason ?? null,
-      };
-    }
+    if (res.ok) return toResult((await res.json()) as Parameters<typeof toResult>[0]);
     const errBody = (await res.json().catch(() => null)) as { error?: { code?: string; type?: string; message?: string } } | null;
     const quota = /insufficient_quota|billing/i.test(`${errBody?.error?.code ?? ''} ${errBody?.error?.type ?? ''}`);
     const retryable = (res.status >= 500 || (res.status === 429 && !quota)) && attempt === 0;
@@ -171,6 +146,125 @@ export async function createResponse(cfg: AiConfig & { apiKey: string }, req: Re
     }
     throw toApiError(res.status, errBody, cfg.model);
   }
+}
+
+function requestBody(cfg: AiConfig, req: ResponsesRequest, stream: boolean): string {
+  return JSON.stringify({
+    model: cfg.model,
+    instructions: req.instructions,
+    input: req.input,
+    tools: req.tools,
+    tool_choice: req.toolChoice,
+    parallel_tool_calls: true,
+    max_output_tokens: cfg.maxOutputTokens,
+    ...(cfg.reasoningEffort ? { reasoning: { effort: cfg.reasoningEffort } } : {}),
+    store: false,
+    ...(stream ? { stream: true } : {}),
+  });
+}
+
+function toResult(data: {
+  id?: string;
+  status?: string;
+  output?: OutputItem[];
+  usage?: unknown;
+  incomplete_details?: { reason?: string } | null;
+}): ResponsesResult {
+  return {
+    id: data.id ?? '',
+    status: data.status ?? 'completed',
+    output: Array.isArray(data.output) ? data.output : [],
+    usage: readUsage(data.usage),
+    incompleteReason: data.incomplete_details?.reason ?? null,
+  };
+}
+
+/** Error event sent inside a stream (after HTTP 200). */
+function streamError(code: string, message: string): ApiError {
+  logFailure('stream', 0, code, message);
+  if (/insufficient_quota|billing/i.test(code)) {
+    return new ApiError('service_unavailable', 'A conta da OpenAI está sem crédito ou atingiu o limite de gastos.');
+  }
+  if (/rate_limit/i.test(code)) return new ApiError('rate_limited', 'A OpenAI limitou as requisições por alguns instantes. Tente de novo em seguida.');
+  return new ApiError('service_unavailable', 'A OpenAI interrompeu a resposta. Tente de novo.');
+}
+
+/**
+ * Same as createResponse, streamed: `onText` receives the answer as it is
+ * written. The final `response.completed` event carries the whole response
+ * (output items and usage), so the turn logic is the same in both modes.
+ */
+export async function createResponseStream(
+  cfg: AiConfig & { apiKey: string },
+  req: ResponsesRequest,
+  onText: (delta: string) => void,
+): Promise<ResponsesResult> {
+  const body = requestBody(cfg, req, true);
+  let res: Response | undefined;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await fetch(`${OPENAI_BASE_URL}/responses`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body,
+        signal: AbortSignal.timeout(cfg.timeoutMs),
+      });
+    } catch (err) {
+      const timeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      logFailure(timeout ? 'timeout' : 'network', 0, '', err instanceof Error ? err.message : String(err));
+      throw new ApiError('service_unavailable', timeout ? 'A OpenAI demorou demais para responder. Tente de novo.' : 'Não foi possível conectar à OpenAI agora.');
+    }
+    if (res.ok) break;
+    const errBody = (await res.json().catch(() => null)) as { error?: { code?: string; type?: string; message?: string } } | null;
+    const quota = /insufficient_quota|billing/i.test(`${errBody?.error?.code ?? ''} ${errBody?.error?.type ?? ''}`);
+    if ((res.status >= 500 || (res.status === 429 && !quota)) && attempt === 0) {
+      await sleep(800);
+      continue;
+    }
+    throw toApiError(res.status, errBody, cfg.model);
+  }
+
+  let final: Parameters<typeof toResult>[0] | null = null;
+  let buffer = '';
+  const handle = (block: string) => {
+    const data = block
+      .split('\n')
+      .filter((l) => l.startsWith('data:'))
+      .map((l) => l.slice(5).trimStart())
+      .join('\n');
+    if (!data || data === '[DONE]') return;
+    let event: { type?: string; delta?: string; response?: Parameters<typeof toResult>[0]; code?: string; message?: string; error?: { code?: string; message?: string } };
+    try {
+      event = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') onText(event.delta);
+    else if (event.type === 'response.completed' || event.type === 'response.incomplete' || event.type === 'response.failed') final = event.response ?? null;
+    else if (event.type === 'error') throw streamError(event.code ?? event.error?.code ?? '', event.message ?? event.error?.message ?? '');
+  };
+  try {
+    const reader = res!.body!.pipeThrough(new TextDecoderStream()).getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      let cut: number;
+      while ((cut = buffer.indexOf('\n\n')) >= 0) {
+        handle(buffer.slice(0, cut));
+        buffer = buffer.slice(cut + 2);
+      }
+    }
+    if (buffer.trim()) handle(buffer);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    logFailure('stream', 0, '', err instanceof Error ? err.message : String(err));
+    throw new ApiError('service_unavailable', 'A conexão com a OpenAI caiu no meio da resposta. Tente de novo.');
+  }
+  if (!final) throw new ApiError('service_unavailable', 'A OpenAI encerrou a resposta antes do fim. Tente de novo.');
+  const result = toResult(final);
+  if (result.status === 'failed') throw streamError('response_failed', 'response.failed');
+  return result;
 }
 
 export function functionCalls(output: OutputItem[]): FunctionCallItem[] {

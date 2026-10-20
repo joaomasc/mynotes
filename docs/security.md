@@ -84,6 +84,7 @@ Detalhes em [ai.md](ai.md). Em resumo:
 - Respostas: links para ids que não existem ou não pertencem ao usuário são removidos; o frontend nunca renderiza HTML do modelo (Markdown vira elementos React, sem imagens).
 - Custos e abuso: limite de mensagens por minuto, de ferramentas e de consultas D1 por mensagem, tamanho máximo de mensagem, histórico limitado, orçamento diário em US$ calculado com o uso real informado pela API, e deduplicação por `messageId` (uma repetição nunca chama o modelo duas vezes).
 - Privacidade: requisições à OpenAI com `store: false`; logs só com contagens de tokens, custo e tempo.
+- Índice semântico: os embeddings são gerados no Workers AI e guardados no Vectorize, dentro da Cloudflare; cada usuário tem o seu *namespace* (a consulta é sempre feita no namespace da sessão) e o índice não guarda texto — os trechos são lidos do D1 com o filtro de dono de sempre.
 
 ## Recomendações operacionais
 

@@ -12,6 +12,7 @@ import {
   type AiContext,
   type AiConversation,
   type AiMessage,
+  type AiToolActivity,
 } from '@mynotes/shared';
 import { Button, IconButton } from '@/components/ui/button';
 import { useConfirm } from '@/components/ui/dialog';
@@ -36,6 +37,24 @@ interface Pending {
   context: AiContext | null;
   conversationId: string | null;
   error: unknown;
+}
+
+interface Live {
+  text: string;
+  tools: AiToolActivity[];
+  status: string;
+}
+const EMPTY_LIVE: Live = { text: '', tools: [], status: 'Enviando…' };
+
+/**
+ * Indexes what changed for the semantic search (its own request, never part
+ * of a chat turn), at most once a minute; `now` skips the wait.
+ */
+let lastSync = 0;
+function syncIndexSoon(now = false) {
+  if (!now && Date.now() - lastSync < 60_000) return;
+  lastSync = Date.now();
+  void endpoints.ai.syncIndex().catch(() => undefined);
 }
 
 const usd = (v: number) => `US$ ${v < 0.01 ? v.toFixed(4) : v.toFixed(2)}`;
@@ -72,19 +91,42 @@ export function AssistantChat({
     if (conversation.error instanceof ApiError && conversation.error.status === 404) setConversationId(null);
   }, [conversation.error, setConversationId]);
 
+  // The answer as it is written, and what the assistant is doing meanwhile.
+  const [live, setLive] = useState<Live>(EMPTY_LIVE);
   const send = useMutation({
-    mutationFn: (p: Pending) =>
-      endpoints.ai.chat({ conversationId: p.conversationId, messageId: p.messageId, message: p.text, context: p.context }),
+    mutationFn: (p: Pending) => {
+      setLive(EMPTY_LIVE);
+      return endpoints.ai.chatStream(
+        { conversationId: p.conversationId, messageId: p.messageId, message: p.text, context: p.context },
+        (event, data) =>
+          setLive((l) => {
+            if (event === 'delta') return { ...l, text: l.text + (data as { text: string }).text };
+            if (event === 'reset') return { ...l, text: '' };
+            if (event === 'tool') return { ...l, tools: [...l.tools, data as AiToolActivity] };
+            if (event === 'status') return { ...l, status: (data as { label: string }).label };
+            return l;
+          }),
+      );
+    },
     onSuccess: (res) => {
       qc.setQueryData<AiConversation>(qk.aiConversation(res.conversation.id), (old) => mergeTurn(old, res));
       setConversationId(res.conversation.id);
       setPending(null);
+      setLive(EMPTY_LIVE);
       void qc.invalidateQueries({ queryKey: qk.aiConversations });
       void qc.invalidateQueries({ queryKey: qk.aiStatus });
       refreshAfterActions(qc, res.actions);
+      // Notes the assistant created become searchable by meaning.
+      if (res.actions.some((a) => a.status === 'executed')) syncIndexSoon(true);
     },
     onError: (err, p) => setPending({ ...p, error: err }),
   });
+
+  // Opening the assistant indexes what changed since the last time (in its own request).
+  const isReady = !!status.data?.enabled && !!status.data?.configured;
+  useEffect(() => {
+    if (isReady) syncIndexSoon();
+  }, [isReady]);
 
   const decide = useMutation({
     mutationFn: ({ action, accept }: { action: AiAction; accept: boolean }) =>
@@ -252,9 +294,7 @@ export function AssistantChat({
                 </div>
               </div>
             ) : (
-              <p className="flex items-center gap-2 text-sm text-muted" role="status">
-                <Spinner className="size-4" label="Aguardando o assistente" /> Consultando suas notas…
-              </p>
+              <LiveAnswer live={live} />
             )}
           </>
         )}
@@ -341,6 +381,28 @@ function Welcome({ onPick, hasContext }: { onPick: (text: string) => void; hasCo
         ))}
       </ul>
     </div>
+  );
+}
+
+/** The answer being written: what the assistant did so far and the text as it arrives. */
+function LiveAnswer({ live }: { live: Live }) {
+  const doc = useMemo(() => markdownToDoc(live.text), [live.text]);
+  return (
+    <article aria-label="Resposta em andamento" aria-busy="true" className="space-y-2">
+      {live.tools.length > 0 && (
+        <ul className="space-y-0.5 text-xs text-muted" aria-label="O que o assistente fez">
+          {live.tools.map((t, i) => (
+            <li key={i} className={cn('flex items-center gap-1', !t.ok && 'text-danger')}>
+              <span aria-hidden>{t.ok ? '✓' : '!'}</span> {t.label}
+            </li>
+          ))}
+        </ul>
+      )}
+      {live.text && <RichText doc={doc} sources={[]} />}
+      <p className="flex items-center gap-2 text-sm text-muted" role="status">
+        <Spinner className="size-4" label="Aguardando o assistente" /> {live.text ? 'Escrevendo…' : live.status}
+      </p>
+    </article>
   );
 }
 

@@ -102,10 +102,12 @@ export async function mockAssistant(page: Page, answer: string): Promise<Record<
       });
     }
     if (url.pathname.endsWith('/ai/conversations')) return json([]);
-    if (url.pathname.endsWith('/ai/chat')) {
+    if (url.pathname.endsWith('/ai/index')) return json({ available: true, model: '@cf/baai/bge-m3', indexed: 3, total: 3 });
+    if (url.pathname.endsWith('/ai/index/sync')) return json({ available: true, model: '@cf/baai/bge-m3', indexed: 3, total: 3, processed: 0, removed: 0, more: false });
+    if (url.pathname.endsWith('/ai/chat/stream')) {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       bodies.push(body);
-      return json({
+      const done = {
         conversation: { id: conversationId, title: String(body.message), contextType: null, contextId: null, messageCount: 2, costUsd: 0.0004, createdAt: now, updatedAt: now },
         userMessage: { id: body.messageId, conversationId, role: 'user', content: body.message, sources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt: now },
         assistantMessage: {
@@ -122,6 +124,19 @@ export async function mockAssistant(page: Page, answer: string): Promise<Record<
         },
         actions: [action],
         replayed: false,
+      };
+      // Server-sent events, like the API: progress, the text in pieces, then the saved turn.
+      const events: [string, unknown][] = [
+        ['status', { label: 'Pesquisando nas suas notas…' }],
+        ['tool', { tool: 'search_knowledge', label: 'Pesquisou automaticamente', kind: 'read', ok: true }],
+        ['delta', { text: answer.slice(0, 10) }],
+        ['delta', { text: answer.slice(10) }],
+        ['done', done],
+      ];
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join(''),
       });
     }
     if (url.pathname.endsWith(`/ai/actions/${action.id}/confirm`)) {

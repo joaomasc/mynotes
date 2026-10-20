@@ -1,6 +1,6 @@
 # Assistente de IA
 
-O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e organiza notas, assuntos, relações e mapas. Ele usa a **OpenAI Responses API** com *function calling*: o modelo só **pede** operações; quem consulta e grava é o Worker, com as mesmas regras e serviços do app.
+O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e organiza notas, assuntos, relações e mapas. Ele usa a **OpenAI Responses API** com *function calling*: o modelo só **pede** operações; quem consulta e grava é o Worker, com as mesmas regras e serviços do app. Para encontrar o que você escreveu, combina a busca por palavras com uma **busca por sentido** (vetores no Cloudflare Vectorize, gerados com o `bge-m3` do Workers AI), e a resposta aparece em tempo real.
 
 ```
  Navegador                          Worker (Hono)                                 OpenAI
@@ -16,15 +16,16 @@ O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e 
 
 - **Fonte oficial dos dados:** as tabelas existentes (`notes`, `topics`, `relations`, `mind_maps`…). O assistente não tem base própria de conhecimento; guarda só a conversa, as propostas/ações e o consumo.
 - **A chave nunca sai do Worker:** o navegador fala só com a API do MyNotes. `GET /ai/status` informa apenas *se* há chave configurada.
-- **Dados não ficam na OpenAI:** as requisições usam `store: false`.
+- **Dados não ficam na OpenAI:** as requisições usam `store: false`. Os vetores são gerados e guardados dentro da Cloudflare.
 
 ## Como funciona um turno
 
-1. `POST /api/v1/ai/chat` com `{ messageId, message, conversationId?, context? }`. O `messageId` é gerado pelo navegador: reenviar o mesmo id devolve a resposta já dada (`replayed: true`) sem chamar o modelo de novo.
-2. O Worker autentica, valida o payload (Zod), aplica o limite por minuto e o orçamento diário, confere que o item em contexto existe e é seu, e monta a entrada: até 12 mensagens anteriores (cortadas em 1.500 caracteres), uma mensagem `developer` com o item aberto (tipo, id e título — nunca o conteúdo) e a pergunta.
-3. O modelo pode chamar ferramentas. Cada chamada é revalidada com Zod, executada com `user_id` em todas as consultas e devolvida como JSON. No máximo `AI_MAX_TOOL_CALLS` chamadas e 6 rodadas por turno; esgotado o limite, uma última chamada com `tool_choice: "none"` obriga o modelo a responder.
-4. A resposta passa por verificação de citações: links `mynotes:<tipo>/<id>` só ficam se o item existir e for seu; os demais viram texto. As fontes exibidas são os itens citados e os lidos por inteiro.
-5. Mensagens, atividade das ferramentas (só rótulos), fontes, tokens e custo vão para o D1. Resultados brutos de ferramentas **não** são guardados.
+1. `POST /api/v1/ai/chat/stream` (o app usa este; `POST /ai/chat` é o mesmo turno sem streaming) com `{ messageId, message, conversationId?, context? }`. O `messageId` é gerado pelo navegador: reenviar o mesmo id devolve a resposta já dada (`replayed: true`) sem chamar o modelo de novo.
+2. O Worker autentica, valida o payload (Zod), aplica o limite por minuto e o orçamento diário e confere que o item em contexto existe e é seu. Esses erros saem como HTTP comum, antes do stream.
+3. **Pré-busca:** antes de chamar o modelo, o Worker já roda a busca híbrida com a mensagem inteira e, se uma nota estiver aberta, lê o texto dela. Tudo vai numa mensagem marcada como dado (não instrução), junto com até 12 mensagens anteriores (cortadas em 1.500 caracteres), uma mensagem `developer` com o item aberto (tipo, id e título) e a pergunta. A maioria das perguntas é respondida **numa única chamada ao modelo**.
+4. O modelo pode chamar ferramentas. Cada chamada é revalidada com Zod, executada com `user_id` em todas as consultas e devolvida como JSON. No máximo `AI_MAX_TOOL_CALLS` chamadas e 6 rodadas por turno; esgotado o limite, uma última chamada com `tool_choice: "none"` obriga o modelo a responder.
+5. A resposta chega em tempo real (eventos SSE `status`, `tool`, `delta`, `reset`, `done`, `error`) e passa por verificação de citações: links `mynotes:<tipo>/<id>` só ficam se o item existir e for seu; os demais viram texto. As fontes exibidas são os itens citados e os lidos por inteiro.
+6. Mensagens, atividade das ferramentas (só rótulos), fontes, tokens e custo vão para o D1. Resultados brutos de ferramentas **não** são guardados.
 
 ## Ferramentas
 
@@ -32,7 +33,7 @@ Lista explícita em `apps/api/src/modules/assistant/service.ts` (`TOOLS`). Não 
 
 | Ferramenta | Tipo | O que faz |
 |---|---|---|
-| `search_knowledge` | leitura | Busca sem acento em notas, resenhas, anotações, assuntos, livros, documentos, conceitos e mapas (pontua por termos encontrados; `#tag` lista notas da tag). |
+| `search_knowledge` | leitura | Busca híbrida (palavras sem acento + sentido) em notas, resenhas, anotações, assuntos, livros, documentos, conceitos e mapas; cada resultado diz como casou; `#tag` lista notas da tag. |
 | `get_note` | leitura | Texto da nota, assunto, livro/página, tags, referências e `version`. |
 | `get_topic` | leitura | Assunto com caminho, subassuntos, notas, livros, documentos, tags e `version`. |
 | `get_topic_tree` | leitura | Hierarquia (toda ou de um assunto) com ids — usada antes de criar assuntos. |
@@ -67,9 +68,20 @@ Texto de notas, títulos, trechos de livros e nomes de arquivos são **dados**. 
 
 ## Busca
 
-Etapa atual: **busca textual** no D1 (`search_text` sem acentos), numa única instrução por grupo de tipos, com pontuação por termos encontrados, palavras vazias removidas e prioridade para o título. O modelo faz *query expansion* sozinho: tenta sinônimos e termos relacionados quando não encontra nada.
+**Busca híbrida.** Cada busca (a pré-busca e a ferramenta `search_knowledge`) roda duas em paralelo e junta os resultados por *reciprocal rank fusion*:
 
-**Busca semântica (embeddings): não implementada, de propósito.** Para uma base pessoal, a busca textual com reformulação pelo modelo responde às perguntas típicas (“onde anotei…”, “quais notas falam de…”) sem infraestrutura nova. Se um dia for preciso: embeddings via API (por exemplo `text-embedding-3-small`) guardados no Cloudflare Vectorize, como índice **derivado e reconstruível** — gerado ao salvar a nota (fila no `ctx.waitUntil`), apagado ao purgar, e reconstruído por um script a partir das notas.
+- **Por palavras:** no D1 (`search_text` sem acentos), uma instrução por grupo de tipos, pontuando quantos termos aparecem, sem palavras vazias e com prioridade para o título. É a melhor para nomes exatos (“Ricardo”, “Plano de Metas”).
+- **Por sentido:** a pergunta vira um vetor (`@cf/baai/bge-m3`, multilíngue, 1024 dimensões) e o Vectorize devolve os trechos mais próximos. Uma nota sobre “substituição de importações e fábricas” aparece numa pergunta sobre “industrialização brasileira” sem ter essa palavra. Cada resultado diz se veio por `texto`, `sentido` ou ambos.
+
+Sem o Vectorize ou o Workers AI (desenvolvimento local com `--local`, cota esgotada), a busca continua só por palavras, sem erro.
+
+### Índice semântico
+
+- **O que entra:** notas (inclusive resenhas e anotações, com livro, página e trecho citado), assuntos (título e descrição), livros/leituras, documentos (título, arquivo e descrição) e conceitos. Cada item vira trechos de ~1.200 caracteres, cortados em parágrafos, com o título repetido no topo e uma pequena sobreposição. Notas longas: os 40 primeiros trechos.
+- **Onde fica:** índice `mynotes-knowledge` do Vectorize, com um *namespace* por usuário (uma consulta nunca vê vetores de outra conta) e ids `<n|t|r|d|c>:<id>:<trecho>`. Nenhum texto é guardado no índice: os trechos são lidos do D1 na hora.
+- **Derivado e reconstruível:** a tabela `knowledge_index` (migração 0004) registra, por item, a data de atualização indexada, o hash do texto, o número de trechos e o modelo. Um item muda → é vetorizado de novo; texto igual (por exemplo, uma nota que só mudou de assunto) → não gasta embedding; item excluído ou na lixeira → os vetores saem; trocar o modelo de embedding → tudo é refeito.
+- **Quando atualiza:** a cada 10 minutos (cron), ao abrir o assistente e quando ele mesmo cria algo (`POST /ai/index/sync`, em requisições próprias, fora do turno de conversa). O cron só pega notas paradas há 2 minutos, para não vetorizar a cada salvamento automático. Em *Configurações › Assistente de IA*: progresso, **Indexar agora** e **Refazer índice**.
+- **Consistência:** o Vectorize aplica as mudanças de forma assíncrona. Um item recém-indexado pode levar de alguns segundos a cerca de um minuto para aparecer na busca por sentido (pela busca por palavras, aparece na hora).
 
 ## PDFs
 
@@ -107,8 +119,9 @@ Valores inválidos caem nos padrões seguros (nunca em “ilimitado”). Os pre�
 #   OPENAI_API_KEY=sk-...
 npm run ai:check -w @mynotes/api            # valida chave e modelo — gratuito (GET /v1/models)
 npm run ai:check -w @mynotes/api -- --ping  # 1 resposta real mínima, mostra tokens e custo (~US$ 0,00001)
-npm run db:migrate:local -w @mynotes/api    # cria as tabelas ai_* no D1 local
-npm run dev:api                              # wrangler dev --local (lê .dev.vars)
+npm run db:migrate:local -w @mynotes/api    # cria as tabelas ai_* e knowledge_index no D1 local
+npm run dev:api                              # wrangler dev --local (lê .dev.vars): busca só por palavras
+npm run dev:ai -w @mynotes/api               # com Workers AI e Vectorize reais (precisa de wrangler login)
 npm run dev:web
 ```
 
@@ -117,11 +130,12 @@ npm run dev:web
 ```bash
 cd apps/api
 npx wrangler secret put OPENAI_API_KEY        # cole a chave quando pedir (não fica no histórico do shell)
-npm run db:migrate:remote                     # aplica 0003_ai_assistant.sql (só cria tabelas)
+npx wrangler vectorize create mynotes-knowledge --dimensions=1024 --metric=cosine   # uma vez (já criado)
+npm run db:migrate:remote                     # aplica 0003 e 0004 (só criam tabelas)
 npm run deploy                                # publica o Worker com as vars de wrangler.jsonc
 ```
 
-A migração `0003` é aditiva: só cria `ai_conversations`, `ai_messages`, `ai_actions` e `ai_usage_daily`. Para desfazer: `DROP` dessas quatro tabelas (nada mais depende delas). As conversas **não** fazem parte do backup.
+As migrações `0003` e `0004` são aditivas: criam `ai_conversations`, `ai_messages`, `ai_actions`, `ai_usage_daily` e `knowledge_index`. Para desfazer: `DROP` dessas tabelas (nada mais depende delas) e `npx wrangler vectorize delete mynotes-knowledge`. Conversas e índice **não** fazem parte do backup (o índice se refaz sozinho a partir das notas).
 
 ### Trocar o modelo ou desligar
 
@@ -134,17 +148,17 @@ A migração `0003` é aditiva: só cria `ai_conversations`, `ai_messages`, `ai_
 - **Nos logs do Worker:** uma linha `{"msg":"ai turn", model, calls, tools, input_tokens, cached_tokens, output_tokens, reasoning_tokens, cost_usd, ms}` por mensagem — sem conteúdo.
 - **Na OpenAI:** o valor oficial está em [platform.openai.com/usage](https://platform.openai.com/usage).
 
-O custo é calculado com os tokens que a própria API informa em cada resposta e os preços configurados. Referência medida em testes reais com `gpt-6-luna`: **~US$ 0,0002 a 0,0004 por mensagem** (6 a 10 mil tokens de entrada, a maior parte em cache; 90 a 200 de saída). Com US$ 5, são milhares de mensagens. O orçamento diário padrão (US$ 0,50) é checado antes de cada mensagem e entre as chamadas ao modelo, e pode ser ultrapassado por no máximo uma chamada.
+O custo é calculado com os tokens que a própria API informa em cada resposta e os preços configurados. Referência medida em testes reais com `gpt-6-luna`, com pré-busca e streaming: **~US$ 0,0002 a 0,0005 por mensagem** (~4 mil tokens de entrada, boa parte em cache; ~100 de saída), **primeiro texto em ~2 s e resposta completa em ~3 s** quando a pré-busca basta (antes eram 5,5–6,8 s, com tudo aparecendo no fim). Os embeddings (`bge-m3`, US$ 0,0118 por 1M tokens) saem da cota diária gratuita do Workers AI, a mesma do ditado. Com US$ 5, são milhares de mensagens. O orçamento diário padrão (US$ 0,50) é checado antes de cada mensagem e entre as chamadas ao modelo, e pode ser ultrapassado por no máximo uma chamada.
 
 ## Testes
 
 ```bash
-npm test                                   # inclui test/assistant.test.ts (API, OpenAI simulada) e web/test/assistant.test.tsx
+npm test                                   # inclui test/assistant.test.ts e test/knowledge-index.test.ts (OpenAI, Workers AI e Vectorize simulados) e web/test/assistant.test.tsx
 npm run test:e2e                           # inclui e2e/tests/assistant.spec.ts e o caso de celular (respostas da IA simuladas no navegador)
 npm run test:ai-live -w @mynotes/api       # OPCIONAL: 3 turnos reais contra a OpenAI (≈ US$ 0,001), usa a chave do .dev.vars
 ```
 
-A suíte normal nunca chama a OpenAI: a chave dos testes é falsa (`vitest.config.ts`) e o `fetch` é simulado. O E2E sobrescreve `OPENAI_API_KEY` com um valor inválido (`e2e/start-api.mjs`).
+A suíte normal nunca chama a OpenAI nem a Cloudflare: a chave dos testes é falsa (`vitest.config.ts`), o `fetch` é simulado, e embeddings e Vectorize são substituídos por versões em memória (`test/semantic-fakes.ts`, com uma pequena tabela de “sentido” para testar a busca semântica). O E2E sobrescreve `OPENAI_API_KEY` com um valor inválido (`e2e/start-api.mjs`).
 
 ## Adicionar uma ferramenta
 
@@ -159,12 +173,12 @@ A suíte normal nunca chama a OpenAI: a chave dos testes é falsa (`vitest.confi
 - **50 consultas D1 por requisição (Workers Free).** As ferramentas recebem um D1 que conta cada instrução executada (contando cada instrução de um *batch*, de forma conservadora) e param em 30. O restante fica para autenticação, histórico e gravação. Por isso, confirmar uma estrutura roda numa requisição própria, sem nova chamada ao modelo, e as criações em lote usam uma instrução `INSERT … SELECT FROM json_each(?)`.
 - **10 ms de CPU por requisição.** O cliente da OpenAI é um `fetch` enxuto (sem o SDK), e esperar a OpenAI não consome CPU. Montar o grafo (`find_connection_path`, mapa de assunto) é o passo mais pesado e já é o mesmo do grafo do app.
 - O D1 limita `SELECT`s compostos: a busca roda em dois grupos de tipos dentro de um batch.
+- A indexação nunca roda dentro de uma mensagem do chat: ela tem requisições próprias (cron e `POST /ai/index/sync`), com até 30 itens e 128 trechos por vez — uma chamada ao Workers AI a cada 32 trechos e um `upsert` no Vectorize.
 
 ## Limitações conhecidas
 
-- Sem *streaming*: a resposta aparece inteira (um indicador mostra que ele está consultando).
 - PDFs: sem leitura do texto (veja acima). EPUB e DOCX idem.
-- Sem busca semântica (veja acima).
+- Busca por sentido: itens recém-indexados levam até ~1 minuto para aparecer; mapas mentais e planos não entram no índice (só na busca por palavras); de notas muito longas, só os 40 primeiros trechos.
 - Mapas: links para mapas mentais aparecem nas fontes, mas não como referência “/” dentro de notas (o editor só referencia assunto, nota, livro, documento e conceito).
 - A detecção de “pedido explícito de alteração” é por palavras em português: uma ordem escrita de forma incomum vira proposta (você confirma no cartão). Esse é o lado seguro.
 - Tabelas em Markdown não são usadas (o editor de notas não tem tabelas).
@@ -185,4 +199,7 @@ A suíte normal nunca chama a OpenAI: a chave dos testes é falsa (`vitest.confi
 | “A resposta excedeu o limite de tamanho” | Aumente `AI_MAX_OUTPUT_TOKENS` ou reduza `AI_REASONING_EFFORT`. |
 | Atividade mostra “limite da mensagem” | A mensagem pediu consultas demais para uma requisição; divida o pedido. |
 | `no such table: ai_messages` | Migração não aplicada: `npm run db:migrate:local` / `db:migrate:remote`. |
+| Configurações mostram “Busca por sentido indisponível” | Ambiente sem os bindings remotos (`dev:api` usa `--local`) ou o índice `mynotes-knowledge` não existe na conta. A busca por palavras continua. |
+| Uma nota nova não aparece pela busca por sentido | Ainda não foi indexada (até 10 min; ou abra o assistente / *Indexar agora*) ou o Vectorize ainda está aplicando a mudança (~1 min). |
+| `no such table: knowledge_index` | Migração 0004 não aplicada. |
 | Detalhes de uma falha | Logs do Worker (`wrangler tail` ou painel): `openai request failed` traz status e código, nunca a chave. |

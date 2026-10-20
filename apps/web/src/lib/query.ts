@@ -108,6 +108,7 @@ export const qk = {
   referencesAll: ['reference'] as const,
   layout: (key: string) => ['layout', key] as const,
   aiStatus: ['ai-status'] as const,
+  aiIndex: ['ai-index'] as const,
   aiConversations: ['ai-conversations'] as const,
   aiConversation: (id: string) => ['ai-conversation', id] as const,
 };

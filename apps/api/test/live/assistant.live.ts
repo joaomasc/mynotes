@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { uuidv7 } from '@mynotes/shared';
-import { client, setupOwner } from '../helpers';
+import { api, client, setupOwner } from '../helpers';
+import { parseSse } from '../openai-mock';
 
 /*
  * Real calls to the OpenAI API (see vitest.live.config.ts). Kept to three
@@ -50,6 +51,17 @@ describe('assistant against the real OpenAI API', () => {
     expect(first.assistantMessage.content).toContain(`mynotes:note/${ricardo.id}`);
     expect(first.assistantMessage.sources.map((s: any) => s.id)).toContain(ricardo.id);
 
+    // 1b. The same kind of question, streamed (what the app uses): text arrives in pieces, then the saved turn.
+    const streamed = await api('POST', '/ai/chat/stream', { token: owner.token, body: { messageId: uuidv7(), message: 'O que anotei sobre Friedrich List?' } });
+    expect(streamed.status).toBe(200);
+    const events = parseSse(await streamed.text());
+    const deltas = events.filter((e) => e.event === 'delta').length;
+    const done = events.at(-1)!;
+    console.info(`\n> (stream) ${deltas} pedaços de texto; ferramentas: ${done.data.assistantMessage?.tools.map((t: any) => t.label).join(' | ')}`);
+    expect(done.event).toBe('done');
+    expect(deltas).toBeGreaterThan(1);
+    expect(done.data.assistantMessage.content).toMatch(/List/);
+
     // 2. A structure is only proposed; confirming creates it with the right hierarchy.
     const second = await turn('Crie um assunto chamado Economia Clássica e subassuntos para Adam Smith e David Ricardo.');
     const proposal = second.actions.find((a: any) => a.tool === 'create_topics');
@@ -76,6 +88,6 @@ describe('assistant against the real OpenAI API', () => {
     const day = new Date().toISOString().slice(0, 10);
     const usage = await env.DB.prepare('SELECT * FROM ai_usage_daily WHERE user_id = ? AND day = ?').bind(owner.user.id, day).first<any>();
     console.info(`\nConsumo real desta execução: ${JSON.stringify(usage)}`);
-    expect(usage.requests).toBe(3);
+    expect(usage.requests).toBe(4);
   });
 });

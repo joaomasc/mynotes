@@ -5,6 +5,8 @@ import { aiConfig, costOf, requireReady } from '../src/modules/assistant/config'
 
 import { hasWriteIntent } from '../src/modules/assistant/prompt';
 import { api, client, setupOwner } from './helpers';
+import { answer, callTools, FAKE_KEY, mockOpenAI, restoreFetch, toolOutputs } from './openai-mock';
+import { installSemanticFakes } from './semantic-fakes';
 
 /*
  * The OpenAI API is always mocked: these tests never make paid calls. Each
@@ -12,57 +14,12 @@ import { api, client, setupOwner } from './helpers';
  * request body is kept for assertions.
  */
 
-const FAKE_KEY = 'sk-test-fake-key-never-sent';
-const usage = { input_tokens: 1200, input_tokens_details: { cached_tokens: 200 }, output_tokens: 80, output_tokens_details: { reasoning_tokens: 20 } };
-
-type Step = (body: any) => object | Response;
-const answer = (text: string): Step => () => ({
-  id: 'resp_text',
-  status: 'completed',
-  output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }],
-  usage,
-});
-const callTools = (...calls: [name: string, args: unknown][]): Step => () => ({
-  id: 'resp_tools',
-  status: 'completed',
-  output: [
-    { type: 'reasoning', id: 'rs_1', encrypted_content: 'opaque', summary: [] },
-    ...calls.map(([name, args], i) => ({
-      type: 'function_call',
-      id: `fc_${i}`,
-      call_id: `call_${Math.random().toString(36).slice(2)}`,
-      name,
-      arguments: typeof args === 'string' ? args : JSON.stringify(args),
-    })),
-  ],
-  usage,
-});
-
-function mockOpenAI(steps: Step[]) {
-  const bodies: any[] = [];
-  const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (!url.startsWith('https://api.openai.com/v1/responses')) throw new Error(`unexpected fetch: ${url}`);
-    expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${FAKE_KEY}`);
-    const body = JSON.parse(String(init?.body));
-    bodies.push(body);
-    const step = steps[bodies.length - 1];
-    if (!step) throw new Error('no scripted OpenAI response left');
-    const out = step(body);
-    return out instanceof Response ? out : Response.json(out);
-  });
-  return { spy, bodies };
-}
-
-/** Outputs the backend sent back to the model for its tool calls, in order. */
-const toolOutputs = (body: any): any[] =>
-  body.input.filter((i: any) => i.type === 'function_call_output').map((i: any) => JSON.parse(String(i.output).replace(/… \[resultado truncado\]$/, '')));
-
 let http: ReturnType<typeof client>;
 let token: string;
 let userId: string;
 
 beforeEach(async () => {
+  installSemanticFakes();
   const owner = await setupOwner();
   token = owner.token;
   userId = owner.user.id;
@@ -214,7 +171,7 @@ describe('assistant: requests and limits', () => {
     expect(failed.status).toBe(503);
     expect(failed.body.error.message).toMatch(/recusou a chave/);
     expect(JSON.stringify(failed.body)).not.toContain(FAKE_KEY);
-    vi.restoreAllMocks();
+    restoreFetch();
 
     // 5xx is retried once; quota errors are not.
     const { bodies } = mockOpenAI([
@@ -225,7 +182,7 @@ describe('assistant: requests and limits', () => {
     expect(quota.status).toBe(503);
     expect(quota.body.error.message).toMatch(/sem crédito/);
     expect(bodies).toHaveLength(2);
-    vi.restoreAllMocks();
+    restoreFetch();
 
     // Nothing was kept from the failed attempts: the same id works now.
     mockOpenAI([answer('Tudo certo.')]);
@@ -296,7 +253,10 @@ describe('assistant: grounded answers', () => {
     expect(msg.content).not.toContain(fake);
     expect(msg.content).toContain('Inventada');
     expect(msg.sources).toEqual([expect.objectContaining({ type: 'note', id: ricardo.id, title: 'David Ricardo' })]);
-    expect(msg.tools).toEqual([expect.objectContaining({ tool: 'search_knowledge', kind: 'read', ok: true })]);
+    expect(msg.tools.map((t: any) => t.label)).toEqual(['Pesquisou automaticamente', 'Pesquisou “teoria valor Ricardo”']);
+    // The automatic search already sent the note to the model, before any tool call.
+    const auto = bodies[0].input.find((i: any) => i.role === 'user' && String(i.content).startsWith('[Dados recuperados automaticamente'));
+    expect(auto.content).toContain(`mynotes:note/${ricardo.id}`);
   });
 
   it('reads only the owner\'s records', async () => {
@@ -324,6 +284,9 @@ describe('assistant: grounded answers', () => {
     const dev = bodies[0].input.find((i: any) => i.role === 'developer');
     expect(dev.content).toContain('Friedrich List');
     expect(dev.content).toContain(`mynotes:note/${n.id}`);
+    // The open note's text goes with the message: "resuma esta nota" needs no tool call.
+    const data = bodies[0].input.find((i: any) => i.role === 'user' && String(i.content).includes('nota_aberta'));
+    expect(data.content).toContain('Sistema nacional de economia política.');
 
     const other = await setupOwner();
     const theirs = (await client(other.token).post('/notes', { title: 'Alheia' })).body.data;
@@ -355,7 +318,7 @@ describe('assistant: grounded answers', () => {
     const res = await send('Leia a nota');
     expect(res.status).toBe(200);
     expect(toolOutputs(bodies[1]).map((o) => o.error)).toEqual(['invalid_arguments', 'invalid_arguments', 'unknown_tool']);
-    expect(res.body.data.assistantMessage.tools.every((t: any) => !t.ok)).toBe(true);
+    expect(res.body.data.assistantMessage.tools.slice(1).every((t: any) => !t.ok)).toBe(true);
   });
 
   it('caps tool calls per turn and then forces a text answer', async () => {
@@ -366,7 +329,8 @@ describe('assistant: grounded answers', () => {
     // 8 calls in 4 rounds, then one call that cannot use tools.
     expect(bodies).toHaveLength(5);
     expect(bodies[4].tool_choice).toBe('none');
-    expect(res.body.data.assistantMessage.tools).toHaveLength(8);
+    // 8 tool calls plus the automatic search.
+    expect(res.body.data.assistantMessage.tools).toHaveLength(9);
   });
 
   it('reads topics, tags, the library with page annotations and topic mind maps', async () => {
@@ -397,7 +361,7 @@ describe('assistant: grounded answers', () => {
     expect(reading.annotations).toEqual([expect.objectContaining({ page: 125, quoted_passage: 'A mercadoria é, antes de tudo…' })]);
     expect(map.outline).toContain('- [topic] Economia Política');
     expect(map.outline).toContain('    - [note] Mais-valia');
-    expect(res.body.data.assistantMessage.tools.map((x: any) => x.ok)).toEqual([true, true, true, true, true, true]);
+    expect(res.body.data.assistantMessage.tools.map((x: any) => x.ok)).toEqual([true, true, true, true, true, true, true]);
   });
 
   it('stops tools that would exceed the per-request database budget', async () => {
@@ -580,7 +544,7 @@ describe('assistant: changes to MyNotes', () => {
     expect((await http.get('/topics')).body.data).toHaveLength(5);
 
     // Asking again reuses everything; a new subtopic is added under the existing root.
-    vi.restoreAllMocks();
+    restoreFetch();
     const again = mockOpenAI([
       callTools(['create_topics', { ...args, topics: [...args.topics.slice(0, 2), { key: 'keynes', title: 'Keynes', description: null, parent_key: 'ep' }] }]),
       answer('Só faltava Keynes.'),
@@ -675,7 +639,7 @@ describe('assistant: changes to MyNotes', () => {
     expect(toolOutputs(bodies[1])[0].status).toBe('awaiting_confirmation');
     const batch = env.DB.batch.bind(env.DB);
     let failed = false;
-    vi.spyOn(env.DB, 'batch').mockImplementation(async (statements: D1PreparedStatement[]) => {
+    const batchSpy = vi.spyOn(env.DB, 'batch').mockImplementation(async (statements: D1PreparedStatement[]) => {
       if (!failed && statements.length === 2) {
         failed = true;
         throw new Error('D1_ERROR: simulated outage');
@@ -686,7 +650,7 @@ describe('assistant: changes to MyNotes', () => {
     expect(confirmed.status).toBe(200);
     expect(confirmed.body.data.action).toMatchObject({ status: 'failed', error: expect.stringMatching(/Falha ao gravar/) });
     expect(JSON.stringify(confirmed.body)).not.toContain('simulated outage');
-    vi.restoreAllMocks();
+    batchSpy.mockRestore();
     expect((await http.get('/topics')).body.data).toHaveLength(0);
   });
 });

@@ -89,6 +89,7 @@ beforeEach(() => {
   setPref(CONVERSATION_PREF, null);
   vi.spyOn(endpoints.ai, 'status').mockResolvedValue(status);
   vi.spyOn(endpoints.ai, 'conversations').mockResolvedValue([]);
+  vi.spyOn(endpoints.ai, 'syncIndex').mockResolvedValue({ available: true, model: '@cf/baai/bge-m3', indexed: 1, total: 1, processed: 0, removed: 0, more: false });
 });
 
 afterEach(() => {
@@ -97,17 +98,29 @@ afterEach(() => {
 });
 
 describe('assistant chat', () => {
-  it('sends with Enter, shows the loading state, then the answer with its sources and tool activity', async () => {
+  it('sends with Enter, streams progress and text, then shows the answer with its sources and tool activity', async () => {
     let resolve!: (r: AiChatResponse) => void;
-    const chat = vi.spyOn(endpoints.ai, 'chat').mockImplementation(() => new Promise((r) => (resolve = r)));
+    let emit!: (event: string, data: unknown) => void;
+    const chat = vi.spyOn(endpoints.ai, 'chatStream').mockImplementation((_body, onEvent) => {
+      emit = onEvent;
+      return new Promise((r) => (resolve = r));
+    });
     renderChat();
     type('Onde anotei a teoria do valor de Ricardo?');
     pressEnter();
-    await waitFor(() =>
-      expect(chat).toHaveBeenCalledWith(expect.objectContaining({ message: 'Onde anotei a teoria do valor de Ricardo?', conversationId: null, context: null })),
-    );
-    expect(await screen.findByText('Consultando suas notas…')).toBeTruthy();
+    await waitFor(() => expect(chat).toHaveBeenCalled());
+    expect(chat.mock.calls[0]![0]).toMatchObject({ message: 'Onde anotei a teoria do valor de Ricardo?', conversationId: null, context: null });
     expect(input().value).toBe('');
+    // Live progress: what it did, then the text as it arrives.
+    act(() => emit('status', { label: 'Pesquisando nas suas notas…' }));
+    expect(await screen.findByText('Pesquisando nas suas notas…')).toBeTruthy();
+    act(() => emit('tool', { tool: 'search_knowledge', label: 'Pesquisou automaticamente', kind: 'read', ok: true }));
+    act(() => emit('delta', { text: 'Está em **David' }));
+    const live = await screen.findByRole('article', { name: 'Resposta em andamento' });
+    expect(within(live).getByText(/Pesquisou automaticamente/)).toBeTruthy();
+    expect(live.textContent).toContain('Está em');
+    act(() => emit('reset', {}));
+    await waitFor(() => expect(live.textContent).not.toContain('Está em'));
 
     await act(async () => resolve(turn(`Está em [David Ricardo](mynotes:note/${noteId}), com **valor-trabalho**.`)));
     const answer = await screen.findByRole('article', { name: 'Resposta do assistente' });
@@ -116,12 +129,14 @@ describe('assistant chat', () => {
     expect(links.map((l) => l.getAttribute('href'))).toEqual([`/notes/${noteId}`, `/notes/${noteId}`]);
     expect(within(answer).getByText('Consultou o MyNotes (1)')).toBeTruthy();
     expect(within(answer).getByText('Fontes')).toBeTruthy();
-    expect(screen.queryByText('Consultando suas notas…')).toBeNull();
+    expect(screen.queryByRole('article', { name: 'Resposta em andamento' })).toBeNull();
+    // Opening the assistant asked the server to index what changed.
+    expect(endpoints.ai.syncIndex).toHaveBeenCalled();
   });
 
   it('shows errors and retries with the same message id', async () => {
     const chat = vi
-      .spyOn(endpoints.ai, 'chat')
+      .spyOn(endpoints.ai, 'chatStream')
       .mockRejectedValueOnce(new ApiError(503, 'service_unavailable', 'A OpenAI está indisponível no momento.'))
       .mockResolvedValueOnce(turn('Agora foi.'));
     renderChat();
@@ -137,7 +152,7 @@ describe('assistant chat', () => {
 
   it('runs a proposal only when the user confirms it', async () => {
     const action = proposal();
-    vi.spyOn(endpoints.ai, 'chat').mockResolvedValue(turn('Confirme a estrutura no cartão.', [action]));
+    vi.spyOn(endpoints.ai, 'chatStream').mockResolvedValue(turn('Confirme a estrutura no cartão.', [action]));
     const confirm = vi.spyOn(endpoints.ai, 'confirm').mockResolvedValue({
       action: { ...action, status: 'executed', results: [{ type: 'topic', id: uuidv7(), title: 'Economia Clássica', role: null, readingId: null, page: null }] },
       event: null,
@@ -158,7 +173,7 @@ describe('assistant chat', () => {
   });
 
   it('sends the open item as context, unless the user removes it', async () => {
-    const chat = vi.spyOn(endpoints.ai, 'chat').mockResolvedValue(turn('ok'));
+    const chat = vi.spyOn(endpoints.ai, 'chatStream').mockResolvedValue(turn('ok'));
     renderChat({ context: { type: 'note', id: noteId, view: null }, contextTitle: 'David Ricardo' });
     expect(screen.getByText(/Contexto: Nota “David Ricardo”/)).toBeTruthy();
     type('Resuma esta nota');

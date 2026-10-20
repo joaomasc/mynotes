@@ -15,7 +15,8 @@ import {
 } from '@mynotes/shared';
 import { num, numOrNull, str, strOrNull, stmt, type Bindable, type Row } from '../../../lib/db';
 import { entityKey, resolveEntities, type EntityRef } from '../../../lib/entities';
-import { defineTool, linkOf, q, S, truncate } from './types';
+import { chunksOf, indexTextOf, semanticSearch, type IndexedType, type SemanticHit } from '../knowledge-index';
+import { defineTool, linkOf, q, S, truncate, type ToolContext } from './types';
 
 const SEARCHABLE = ['note', 'topic', 'reading', 'document', 'concept', 'mindmap'] as const;
 type Searchable = (typeof SEARCHABLE)[number];
@@ -115,6 +116,142 @@ async function topicTitles(db: D1Database, userId: string, ids: (string | null)[
 
 /* -------------------------------------------------------- search_knowledge -- */
 
+/** One search result, from the text search, the semantic index or both. */
+export interface FoundItem {
+  type: SearchEntityType;
+  id: string;
+  title: string;
+  role: NoteRole | null;
+  readingId: string | null;
+  readingTitle: string | null;
+  page: number | null;
+  topicId: string | null;
+  snippet: string;
+  updatedAt: string;
+  /** texto: shares keywords; sentido: close in meaning; texto+sentido: both. */
+  matched: 'texto' | 'sentido' | 'texto+sentido';
+  termHits: number;
+  /** Cosine similarity of the closest chunk (semantic matches). */
+  similarity: number | null;
+}
+
+const RRF_K = 60;
+/** Results found only by meaning that may enter the ranking. */
+const SEMANTIC_ONLY_MAX = 12;
+
+/** Items found only by meaning: the row plus the text their chunk is cut from. */
+const ROW_SQL: Record<IndexedType, string> = {
+  note: `SELECT 'note' AS type, id, title, topic_id, updated_at, role, reading_id, page, quote, body_text,
+                (SELECT r.title FROM readings r WHERE r.id = notes.reading_id) AS reading_title
+           FROM notes WHERE user_id = ? AND deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))`,
+  topic: `SELECT 'topic' AS type, id, title, description, parent_id AS topic_id, updated_at
+            FROM topics WHERE user_id = ? AND deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))`,
+  reading: `SELECT 'reading' AS type, id, title, author, notes, topic_id, updated_at
+              FROM readings WHERE user_id = ? AND id IN (SELECT value FROM json_each(?))`,
+  document: `SELECT 'document' AS type, id, title, original_name, description, topic_id, updated_at
+               FROM documents WHERE user_id = ? AND deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))`,
+  concept: `SELECT 'concept' AS type, id, name AS title, name, description, topic_id, updated_at
+              FROM concepts WHERE user_id = ? AND id IN (SELECT value FROM json_each(?))`,
+};
+
+/**
+ * Hybrid search: the text search (keywords, names) and the semantic index
+ * (meaning: "industrialização" finds "substituição de importações") run in
+ * parallel and are merged by reciprocal rank fusion. Without the semantic
+ * index (local dev, quota) it is the text search alone.
+ */
+export async function hybridSearch(
+  ctx: ToolContext,
+  query: string,
+  opts: { types?: readonly Searchable[] | null; limit: number; snippetChars: number },
+): Promise<{ terms: string[]; semantic: boolean; items: FoundItem[] }> {
+  const terms = assistantTerms(query);
+  const types = opts.types?.length ? [...new Set(opts.types)] : [...SEARCHABLE];
+  // D1 caps compound SELECTs: at most 3 branches per statement, all in one batch.
+  const groups = [types.slice(0, 3), types.slice(3)].filter((g) => g.length > 0);
+  const [textRes, hits] = await Promise.all([
+    terms.length ? ctx.db.batch<Row>(groups.map((g) => searchStatement(ctx.db, ctx.userId, terms, g, opts.limit))) : Promise.resolve([]),
+    semanticSearch(ctx.env, ctx.userId, query),
+  ]);
+  const textRows = textRes
+    .flatMap((r) => r.results ?? [])
+    .sort((x, y) => num(y.hits) - num(x.hits) || num(y.title_hits) - num(x.title_hits) || str(y.updated_at).localeCompare(str(x.updated_at)));
+
+  const fused = new Map<string, { score: number; row?: Row; hit?: SemanticHit }>();
+  textRows.forEach((row, i) => fused.set(`${str(row.type)}:${str(row.id)}`, { score: 1 / (RRF_K + i + 1), row }));
+  (hits ?? [])
+    .filter((h) => (types as string[]).includes(h.type))
+    .slice(0, SEMANTIC_ONLY_MAX)
+    .forEach((hit, i) => {
+      const key = `${hit.type}:${hit.id}`;
+      const cur = fused.get(key);
+      fused.set(key, { score: (cur?.score ?? 0) + 1 / (RRF_K + i + 1), ...(cur?.row ? { row: cur.row } : {}), hit });
+    });
+  const ranked = [...fused.values()].sort((a, b) => b.score - a.score).slice(0, opts.limit);
+
+  // Items found only by meaning: read them (what no longer exists is dropped).
+  const missing = new Map<IndexedType, string[]>();
+  for (const f of ranked) if (!f.row && f.hit) missing.set(f.hit.type, [...(missing.get(f.hit.type) ?? []), f.hit.id]);
+  const loaded = new Map<string, Row>();
+  if (missing.size) {
+    const res = await ctx.db.batch<Row>([...missing].map(([type, ids]) => stmt(ctx.db, ROW_SQL[type], ctx.userId, JSON.stringify(ids))));
+    for (const r of res) for (const row of r.results ?? []) loaded.set(`${str(row.type)}:${str(row.id)}`, row);
+  }
+
+  const items: FoundItem[] = [];
+  for (const f of ranked) {
+    const row = f.row ?? (f.hit ? loaded.get(`${f.hit.type}:${f.hit.id}`) : undefined);
+    if (!row) continue;
+    const type = str(row.type) as SearchEntityType;
+    const role = type === 'note' ? ((strOrNull(row.role) ?? 'note') as NoteRole) : null;
+    const page = numOrNull(row.page);
+    const readingTitle = strOrNull(row.reading_title);
+    let snippet = clean(row.snippet);
+    if (!f.row && f.hit) {
+      // The chunk that matched (deterministic chunking of the current text), without its heading line.
+      const chunks = chunksOf(indexTextOf(f.hit.type, row));
+      const chunk = chunks[f.hit.chunk] ?? chunks[0] ?? '';
+      snippet = clean(chunk.slice(chunk.indexOf('\n') + 1));
+    }
+    items.push({
+      type,
+      id: str(row.id),
+      title: str(row.title) || untitled(role, readingTitle, page),
+      role,
+      readingId: strOrNull(row.reading_id),
+      readingTitle,
+      page,
+      topicId: strOrNull(row.topic_id),
+      snippet: truncate(snippet, opts.snippetChars).text,
+      updatedAt: str(row.updated_at),
+      matched: f.row && f.hit ? 'texto+sentido' : f.row ? 'texto' : 'sentido',
+      termHits: num(row.hits),
+      similarity: f.hit ? Math.round(f.hit.score * 1000) / 1000 : null,
+    });
+  }
+  return { terms, semantic: hits !== null, items };
+}
+
+/** Results as the model sees them (ids, links, topic, book, how they matched). */
+export async function presentResults(ctx: ToolContext, items: FoundItem[]) {
+  const topics = await topicTitles(ctx.db, ctx.userId, items.map((i) => i.topicId));
+  return items.map((i) => {
+    ctx.sources.add({ type: i.type, id: i.id, title: i.title, role: i.role, readingId: i.readingId, page: i.page });
+    return {
+      type: i.role && i.role !== 'note' ? `${i.type}:${i.role}` : i.type,
+      id: i.id,
+      link: linkOf(i.type, i.id),
+      title: i.title,
+      snippet: i.snippet,
+      topic: i.topicId ? { id: i.topicId, title: topics.get(i.topicId) ?? '' } : null,
+      ...(i.readingTitle ? { book: { id: i.readingId, title: i.readingTitle }, page: i.page } : {}),
+      matched: i.matched,
+      ...(i.similarity !== null ? { similarity: i.similarity } : {}),
+      updated: i.updatedAt.slice(0, 10),
+    };
+  });
+}
+
 const zSearch = z.strictObject({
   query: z.string().trim().min(1).max(200),
   types: z.array(z.enum(SEARCHABLE)).max(6).nullable(),
@@ -125,25 +262,23 @@ export const searchKnowledge = defineTool({
   name: 'search_knowledge',
   kind: 'read',
   description:
-    'Full-text search over the user\'s MyNotes (notes, book reviews and page annotations, topics, books/readings, documents, concepts, mind maps). ' +
-    'Accent and case insensitive; results rank by how many keywords match. Pass 1–4 keywords, not a sentence; try synonyms or a related term if nothing is found. ' +
-    'A query starting with # lists the notes with that tag. Returns ids, titles and snippets; read a note in full with get_note.',
+    "Hybrid search over the user's MyNotes (notes, book reviews and page annotations, topics, books/readings, documents, concepts, mind maps): " +
+    'keywords (accent and case insensitive) plus meaning (semantic index), merged. A short phrase or 1–5 keywords work best. ' +
+    '"matched" says whether a result shares words ("texto"), meaning ("sentido") or both. A query starting with # lists the notes with that tag. ' +
+    'Returns ids, titles and snippets; read a note in full with get_note.',
   parameters: S.obj({
-    query: S.str('Keywords, e.g. "teoria valor Ricardo", or "#tag".'),
+    query: S.str('A short phrase or keywords, e.g. "teoria do valor de Ricardo", or "#tag".'),
     types: S.narr(S.enum(SEARCHABLE), 'Restrict to these types (null = all).'),
     limit: S.nint('Max results, 1–20 (default 10).'),
   }),
   args: zSearch,
-  dbCost: 3,
+  dbCost: 8,
   label: (a) => `Pesquisou ${q(a.query)}`,
   async run(ctx, a) {
     const limit = a.limit ?? 10;
-    let rows: Row[];
-    let terms: string[];
     if (a.query.startsWith('#')) {
       const tag = normalizeTag(a.query);
-      terms = [`#${tag}`];
-      rows = (
+      const rows = (
         await stmt(
           ctx.db,
           `SELECT 'note' AS type, id, title, excerpt AS snippet, topic_id, updated_at, role, reading_id, page,
@@ -157,43 +292,36 @@ export const searchKnowledge = defineTool({
           limit,
         ).all<Row>()
       ).results;
-    } else {
-      terms = assistantTerms(a.query);
-      if (terms.length === 0) return { error: 'invalid_arguments', message: 'Informe ao menos uma palavra-chave.' };
-      const types = a.types?.length ? [...new Set(a.types)] : [...SEARCHABLE];
-      // D1 caps compound SELECTs: at most 3 branches per statement, all in one batch.
-      const groups = [types.slice(0, 3), types.slice(3)].filter((g) => g.length > 0);
-      const res = await ctx.db.batch<Row>(groups.map((g) => searchStatement(ctx.db, ctx.userId, terms, g, limit)));
-      rows = res
-        .flatMap((r) => r.results ?? [])
-        .sort(
-          (x, y) =>
-            num(y.hits) - num(x.hits) || num(y.title_hits) - num(x.title_hits) || str(y.updated_at).localeCompare(str(x.updated_at)),
-        )
-        .slice(0, limit);
+      const items: FoundItem[] = rows.map((r) => {
+        const role = (strOrNull(r.role) ?? 'note') as NoteRole;
+        return {
+          type: 'note',
+          id: str(r.id),
+          title: str(r.title) || untitled(role, strOrNull(r.reading_title), numOrNull(r.page)),
+          role,
+          readingId: strOrNull(r.reading_id),
+          readingTitle: strOrNull(r.reading_title),
+          page: numOrNull(r.page),
+          topicId: strOrNull(r.topic_id),
+          snippet: truncate(clean(r.snippet), 260).text,
+          updatedAt: str(r.updated_at),
+          matched: 'texto',
+          termHits: 1,
+          similarity: null,
+        };
+      });
+      const results = await presentResults(ctx, items);
+      return { tag: `#${tag}`, total: results.length, results };
     }
-    const topics = await topicTitles(ctx.db, ctx.userId, rows.map((r) => strOrNull(r.topic_id)));
-    const results = rows.map((r) => {
-      const type = str(r.type) as SearchEntityType;
-      const role = type === 'note' ? ((strOrNull(r.role) ?? 'note') as NoteRole) : null;
-      const page = numOrNull(r.page);
-      const readingTitle = strOrNull(r.reading_title);
-      const title = str(r.title) || untitled(role, readingTitle, page);
-      ctx.sources.add({ type, id: str(r.id), title, role, readingId: strOrNull(r.reading_id), page });
-      const topicId = strOrNull(r.topic_id);
-      return {
-        type: role && role !== 'note' ? `${type}:${role}` : type,
-        id: str(r.id),
-        link: linkOf(type, str(r.id)),
-        title,
-        snippet: truncate(clean(r.snippet), 260).text,
-        topic: topicId ? { id: topicId, title: topics.get(topicId) ?? '' } : null,
-        ...(readingTitle ? { book: { id: strOrNull(r.reading_id), title: readingTitle }, page } : {}),
-        matched_terms: num(r.hits),
-        updated: day(r.updated_at),
-      };
-    });
-    return { terms, total: results.length, results };
+    const found = await hybridSearch(ctx, a.query, { types: a.types, limit, snippetChars: 320 });
+    if (found.terms.length === 0 && !found.semantic) return { error: 'invalid_arguments', message: 'Informe ao menos uma palavra-chave.' };
+    const results = await presentResults(ctx, found.items);
+    return {
+      mode: found.semantic ? 'híbrida (palavras + sentido)' : 'textual (índice semântico indisponível)',
+      terms: found.terms,
+      total: results.length,
+      results,
+    };
   },
 });
 

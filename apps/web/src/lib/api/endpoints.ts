@@ -5,6 +5,8 @@ import type {
   AiChatResponse,
   AiConversation,
   AiConversationSummary,
+  AiIndexStatus,
+  AiIndexSync,
   AiStatus,
   Backlink,
   BrokenReference,
@@ -73,6 +75,7 @@ import type {
   ViewLayoutData,
 } from '@mynotes/shared';
 import { api } from './client';
+import { postStream } from './sse';
 
 /** Every API call used by the app, typed with the shared contract. */
 export const endpoints = {
@@ -256,6 +259,12 @@ export const endpoints = {
      * user retries with the same messageId, which the API answers only once.
      */
     chat: (body: AiChatRequest) => api.post<AiChatResponse>('/ai/chat', body, { retries: 0, track: false }),
+    /** The same turn, streamed: progress and text arrive in `onEvent` (status, tool, delta, reset). */
+    chatStream: (body: AiChatRequest, onEvent: (event: string, data: unknown) => void, signal?: AbortSignal) =>
+      postStream<AiChatResponse>('/ai/chat/stream', body, onEvent, signal),
+    index: () => api.get<AiIndexStatus>('/ai/index'),
+    /** One indexing batch of what changed (`more`: call again). */
+    syncIndex: (body: { reset?: boolean; settle?: boolean } = {}) => api.post<AiIndexSync>('/ai/index/sync', body, { retries: 0, track: false }),
     conversations: () => api.get<AiConversationSummary[]>('/ai/conversations'),
     conversation: (id: string) => api.get<AiConversation>(`/ai/conversations/${id}`),
     removeConversation: (id: string) => api.del(`/ai/conversations/${id}`),

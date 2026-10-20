@@ -29,8 +29,9 @@ Changing data
 - There is no delete tool: if asked to delete, explain that the user can do it in the app.
 
 Context
-- A developer message may say which item the user is viewing. "Esta nota", "este assunto", "aqui" refer to it; read it with the tools when needed.
-- Be economical: use the fewest tool calls that answer well (usually 1–3), and keep answers focused.`;
+- A developer message may say which item the user is viewing. "Esta nota", "este assunto", "aqui" refer to it.
+- Before the user's message you may get "[Dados recuperados automaticamente do MyNotes…]": the open note's text and a hybrid search already run on the user's whole message (words + meaning). Results with matched "sentido" are relevant by meaning even when they don't contain the words. When these results answer the question, answer directly from them, citing their links — do NOT run the same search again. Use the tools only for what they lack (the full text of a note with get_note, a different subject, a write…).
+- Be economical: use the fewest tool calls that answer well (often none or one), and keep answers focused.`;
 }
 
 /** Questions and requests for advice: never authorization to change data. */

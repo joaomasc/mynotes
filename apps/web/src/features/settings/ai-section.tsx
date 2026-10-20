@@ -1,6 +1,86 @@
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { Badge, ErrorState, Spinner } from '@/components/ui/feedback';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/dialog';
+import { Badge, ErrorState, Progress, Spinner } from '@/components/ui/feedback';
+import { errorMessage } from '@/lib/api/client';
+import { endpoints } from '@/lib/api/endpoints';
+import { qk } from '@/lib/query';
 import { useAiStatus } from '../assistant/use-assistant';
+
+/**
+ * Semantic index (vectors of notes, topics, books…): progress, "index now"
+ * and rebuild. Indexing also runs every 10 minutes and when the assistant
+ * opens; this is for the first time and after big imports.
+ */
+function IndexSection() {
+  const qc = useQueryClient();
+  const confirm = useConfirm();
+  const index = useQuery({ queryKey: qk.aiIndex, queryFn: endpoints.ai.index, staleTime: 30_000 });
+  const [running, setRunning] = useState(false);
+
+  const run = async (reset: boolean) => {
+    if (
+      reset &&
+      !(await confirm({
+        title: 'Refazer o índice semântico?',
+        description: 'Tudo é vetorizado de novo, aos poucos. As notas não mudam; a busca por palavras continua funcionando durante o processo.',
+        confirmLabel: 'Refazer',
+      }))
+    ) {
+      return;
+    }
+    setRunning(true);
+    try {
+      let first = true;
+      for (let i = 0; i < 100; i++) {
+        const res = await endpoints.ai.syncIndex({ reset: reset && first });
+        first = false;
+        qc.setQueryData(qk.aiIndex, { available: res.available, model: res.model, indexed: res.indexed, total: res.total });
+        if (!res.more) break;
+      }
+      toast.success('Índice semântico atualizado');
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setRunning(false);
+      void qc.invalidateQueries({ queryKey: qk.aiIndex });
+    }
+  };
+
+  if (index.isLoading) return <Spinner className="size-4" />;
+  if (!index.data) return <p className="text-muted">Não foi possível ler o estado do índice.</p>;
+  const { available, indexed, total, model } = index.data;
+  const pct = total ? Math.min(100, (indexed / total) * 100) : 100;
+  return (
+    <div className="space-y-2">
+      <h3 className="font-medium">Busca por sentido (índice semântico)</h3>
+      {!available ? (
+        <p className="text-muted">
+          Indisponível neste ambiente (Vectorize/Workers AI precisam dos bindings remotos). O assistente usa só a busca por palavras.
+        </p>
+      ) : (
+        <>
+          <p className="text-muted">
+            {indexed} de {total} itens vetorizados com <span className="font-mono text-[13px]">{model}</span>. Atualiza sozinho a cada 10 minutos e ao abrir o
+            assistente.
+          </p>
+          <Progress value={pct} label="Itens indexados" />
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button size="sm" variant="outline" loading={running} onClick={() => void run(false)}>
+              Indexar agora
+            </Button>
+            <Button size="sm" variant="ghost" disabled={running} onClick={() => void run(true)}>
+              Refazer índice
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 const usd = (v: number) => `US$ ${v.toFixed(v < 0.01 ? 5 : 3)}`;
 const int = (v: number) => v.toLocaleString('pt-BR');
@@ -57,6 +137,8 @@ export function AiSection() {
           </>
         )}
       </dl>
+
+      {s.enabled && s.configured && <IndexSection />}
 
       <div>
         <h3 className="mb-2 font-medium">Últimos 30 dias</h3>

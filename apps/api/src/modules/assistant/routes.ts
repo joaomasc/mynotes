@@ -1,9 +1,29 @@
 import { createRoute, z } from '@hono/zod-openapi';
-import { zAiActionDecision, zAiChatRequest, zAiChatResponse, zAiConversation, zAiConversationSummary, zAiStatus } from '@mynotes/shared';
+import { streamSSE } from 'hono/streaming';
+import {
+  zAiActionDecision,
+  zAiChatRequest,
+  zAiChatResponse,
+  zAiConversation,
+  zAiConversationSummary,
+  zAiIndexStatus,
+  zAiIndexSync,
+  zAiIndexSyncRequest,
+  zAiStatus,
+} from '@mynotes/shared';
 import type { ApiApp } from '../../app';
+import { ApiError } from '../../lib/errors';
 import { errors, idParam, jsonBody, noContent, ok, secured } from '../../lib/openapi';
 import { confirmAction, rejectAction } from './actions';
-import { aiStatus, chat, deleteConversation, getConversation, listConversations } from './service';
+import { indexStatus, resetIndex, syncKnowledgeIndex } from './knowledge-index';
+import { aiStatus, chat, deleteConversation, getConversation, listConversations, prepareTurn, runTurn } from './service';
+
+/** Error sent inside a stream (after the 200 response started): safe messages only. */
+function errorEvent(err: unknown) {
+  if (err instanceof ApiError) return { code: err.code, message: err.message, status: err.status };
+  console.error(JSON.stringify({ level: 'error', msg: 'ai stream failed', error: err instanceof Error ? err.message.slice(0, 300) : String(err) }));
+  return { code: 'internal_error', message: 'Erro interno. Tente novamente em instantes.', status: 500 };
+}
 
 const tags = ['Assistente de IA'];
 const unavailable = { 503: errors[500] };
@@ -39,6 +59,82 @@ export function assistantRoutes(app: ApiApp) {
     async (c) => {
       const body = c.req.valid('json');
       return c.json({ data: await chat(c.env, c.get('userId'), body) }, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/ai/chat/stream',
+      tags,
+      summary: 'Enviar uma mensagem ao assistente, com a resposta em tempo real (SSE)',
+      description:
+        'Mesmo turno de `POST /ai/chat`, como `text/event-stream`: eventos `status` ({label}), `tool` (atividade), `delta` ({text}), ' +
+        '`reset` (descartar o texto parcial), `done` (o mesmo corpo de /ai/chat) e `error` ({code, message}). ' +
+        'Limites, chave ausente e mensagens repetidas respondem antes do stream, como erros HTTP comuns.',
+      security: secured,
+      request: { body: jsonBody(zAiChatRequest) },
+      responses: {
+        200: { description: 'Fluxo de eventos', content: { 'text/event-stream': { schema: z.string() } } },
+        ...errors,
+        ...unavailable,
+      },
+    }),
+    async (c) => {
+      const prepared = await prepareTurn(c.env, c.get('userId'), c.req.valid('json'));
+      return streamSSE(c, async (stream) => {
+        const send = (event: string, data: unknown) => stream.writeSSE({ event, data: JSON.stringify(data) }).catch(() => undefined);
+        if (prepared.kind === 'replay') {
+          await send('done', prepared.response);
+          return;
+        }
+        const turn = runTurn(prepared, (e) => void send(e.type, e.data), { stream: true });
+        // The turn finishes and is saved even if the browser disconnects.
+        c.executionCtx.waitUntil(turn.then(() => undefined, () => undefined));
+        try {
+          await send('done', await turn);
+        } catch (err) {
+          await send('error', errorEvent(err));
+        }
+      }) as unknown as never;
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/ai/index',
+      tags,
+      summary: 'Estado do índice semântico (quantos itens já estão vetorizados)',
+      security: secured,
+      responses: { 200: ok(zAiIndexStatus), ...errors },
+    }),
+    async (c) => c.json({ data: await indexStatus(c.env, c.get('userId')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/ai/index/sync',
+      tags,
+      summary: 'Indexar agora o que mudou (um lote por chamada)',
+      description: '`more: true` indica que ainda há itens; chame de novo. `reset: true` refaz o índice inteiro aos poucos.',
+      security: secured,
+      request: { body: jsonBody(zAiIndexSyncRequest) },
+      responses: { 200: ok(zAiIndexSync), ...errors, ...unavailable },
+    }),
+    async (c) => {
+      const userId = c.get('userId');
+      const body = c.req.valid('json');
+      if (body.reset) await resetIndex(c.env, userId);
+      try {
+        // Edits of the last seconds count too: the user asked for it now.
+        const result = await syncKnowledgeIndex(c.env, userId, { settleSeconds: body.settle ? 120 : 0 });
+        return c.json({ data: { ...result, ...(await indexStatus(c.env, userId)) } }, 200);
+      } catch (err) {
+        console.error(JSON.stringify({ level: 'error', msg: 'knowledge index sync failed', error: err instanceof Error ? err.message.slice(0, 300) : String(err) }));
+        throw new ApiError('service_unavailable', 'O índice semântico está indisponível agora (Workers AI ou Vectorize). A busca por palavras continua funcionando.');
+      }
     },
   );
 
