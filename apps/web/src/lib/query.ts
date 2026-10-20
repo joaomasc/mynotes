@@ -113,4 +113,5 @@ export const qk = {
   aiConversation: (id: string) => ['ai-conversation', id] as const,
   speechAttempts: ['speech-attempts'] as const,
   speechAttempt: (id: string) => ['speech-attempt', id] as const,
+  speechPath: (today: string) => ['speech-path', today] as const,
 };

@@ -154,7 +154,7 @@ export function Component() {
         } · ${SPEECH_TYPE_LABELS[attempt.speechType]}`}
         actions={
           <>
-            <Button variant="outline" icon={<Mic className="size-4" />} onClick={() => void navigate(attempt.topicId ? `/speaking?topic=${attempt.topicId}` : '/speaking')}>
+            <Button variant="outline" icon={<Mic className="size-4" />} onClick={() => void navigate(attempt.lessonId ? `/speaking/lesson/${attempt.lessonId}` : attempt.topicId ? `/speaking/free?topic=${attempt.topicId}` : '/speaking/free')}>
               Falar de novo
             </Button>
             <Menu

@@ -28,6 +28,9 @@ const FIXED: [string, string, string][] = [
   ['/assistant', 'Assistente', 'assistant'],
   ['/speaking', 'Oratória', 'speaking'],
   ['/speaking/attempts/:id', 'Resultado da fala', 'speaking'],
+  ['/speaking/free', 'Treino livre', 'speaking'],
+  ['/speaking/lesson/:id', 'Lição de oratória', 'speaking'],
+  ['/speaking/progress', 'Progresso na oratória', 'speaking'],
   ['/settings', 'Configurações', 'settings'],
   ['/trash', 'Lixeira', 'trash'],
 ];

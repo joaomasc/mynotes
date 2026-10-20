@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { zSpeechSettings } from './speech-path';
 import {
   DESCRIPTION_MAX,
   ENTITY_TYPES,
@@ -528,6 +529,7 @@ export const SETTINGS_SCHEMAS = {
   notes: zNoteSettings,
   study_timer: zStudyTimer,
   study_goals: zStudyGoals,
+  speech: zSpeechSettings,
 } as const;
 export type SettingKey = keyof typeof SETTINGS_SCHEMAS;
 export const SETTING_KEYS = Object.keys(SETTINGS_SCHEMAS) as SettingKey[];

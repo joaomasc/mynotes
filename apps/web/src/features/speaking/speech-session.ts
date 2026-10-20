@@ -38,6 +38,17 @@ export interface SpeechSetup {
   targetSeconds: number | null;
   /** Terms of the theme (topic title…), which may repeat freely. */
   themeWords: string[];
+  /** The lesson or challenge the talk belongs to. */
+  lessonId?: string | null;
+}
+
+/** A talk measured but not saved (short exercises: reading aloud, tongue twisters). */
+export interface SpeechRecording {
+  words: SpeechWord[];
+  segments: SpeechSegment[];
+  frames: AcousticFrame[];
+  metrics: ReturnType<typeof computeSpeechMetrics>;
+  transcript: string;
 }
 
 export type SpeechSessionStatus = 'idle' | 'starting' | 'recording' | 'finishing' | 'saving';
@@ -117,6 +128,8 @@ export class SpeechSession {
   /** Segments are encoded one after the other, so they keep their order. */
   private encoding: Promise<void> = Promise.resolve();
   private disposed = false;
+  /** Kept in IndexedDB (recoverable) and saved as a talk; off for short exercises. */
+  private persist = true;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -141,9 +154,10 @@ export class SpeechSession {
     window.addEventListener('online', this.onOnline);
   }
 
-  async start(setup: SpeechSetup): Promise<void> {
+  async start(setup: SpeechSetup, options: { persist?: boolean } = {}): Promise<void> {
     if (this.state.status !== 'idle') return;
-    await discardPendingTalk();
+    this.persist = options.persist ?? true;
+    if (this.persist) await discardPendingTalk();
     this.set({ ...IDLE, status: 'starting' });
     this.talk = { id: uuidv7(), setup, startedAt: new Date().toISOString(), localDay: todayIso(), words: [], segments: [], texts: [], stopped: false, elapsed: 0 };
     this.seq = 0;
@@ -181,7 +195,7 @@ export class SpeechSession {
       return;
     }
     this.analyzer = analyzer;
-    await set(TALK_KEY, this.talk, store).catch(() => undefined);
+    await this.keep(TALK_KEY, this.talk);
     this.startedAtMs = Date.now();
     this.set({ status: 'recording' });
     this.clock = setInterval(() => {
@@ -204,6 +218,19 @@ export class SpeechSession {
    * saves the talk. Resolves with the saved attempt.
    */
   async stop(): Promise<SpeechAttempt | null> {
+    const recording = await this.collect();
+    return recording ? this.save(recording) : null;
+  }
+
+  /** Stops and measures without saving (exercises). The session is idle again afterwards. */
+  async measure(): Promise<SpeechRecording | null> {
+    const recording = await this.collect();
+    this.talk = null;
+    this.set(IDLE);
+    return recording;
+  }
+
+  private async collect(): Promise<SpeechRecording | null> {
     if (this.state.status !== 'recording' || !this.talk) return null;
     this.recorder?.stop();
     this.recorder = null;
@@ -211,15 +238,39 @@ export class SpeechSession {
     const elapsed = (Date.now() - this.startedAtMs) / 1000;
     this.talk.stopped = true;
     this.talk.elapsed = elapsed;
-    await set(TALK_KEY, this.talk, store).catch(() => undefined);
+    await this.keep(TALK_KEY, this.talk);
     this.set({ status: 'finishing', level: 0 });
     const analyzer = this.analyzer;
     this.analyzer = null;
     const framesPromise = analyzer ? analyzer.finish().catch(() => [] as AcousticFrame[]) : Promise.resolve([] as AcousticFrame[]);
     await this.encoding;
     await this.drain();
-    if (this.disposed) return null;
-    return this.save(await framesPromise);
+    if (this.disposed || !this.talk) return null;
+    return this.recordingOf(this.talk, await framesPromise);
+  }
+
+  private recordingOf(talk: PendingTalk, frames: AcousticFrame[]): SpeechRecording {
+    const words = [...talk.words].sort((a, b) => a.start - b.start);
+    const metrics = computeSpeechMetrics({
+      frames,
+      words,
+      segments: talk.segments,
+      targetSeconds: talk.setup.targetSeconds,
+      themeWords: talk.setup.themeWords,
+    });
+    if (metrics.durationSeconds === 0 && frames.length === 0) metrics.durationSeconds = Math.round(talk.elapsed * 100) / 100;
+    const transcript = [...talk.segments]
+      .sort((a, b) => a.start - b.start)
+      .map((seg) => seg.text)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return { words, segments: talk.segments, frames, metrics, transcript: (transcript || talk.texts.join(' ')).slice(0, 40_000) };
+  }
+
+  /** IndexedDB write, only for talks that are kept. */
+  private async keep(key: string, value: unknown) {
+    if (this.persist) await set(key, value, store).catch(() => undefined);
   }
 
   /** Throws the talk away (nothing is saved). */
@@ -259,7 +310,7 @@ export class SpeechSession {
     this.set({ ...IDLE, status: 'finishing', pending: this.queue.length, words: talk.words.length });
     void this.pump();
     await this.drain();
-    return this.save([]);
+    return this.talk ? this.save(this.recordingOf(this.talk, [])) : null;
   }
 
   dispose(): void {
@@ -285,7 +336,7 @@ export class SpeechSession {
       const item: PendingSegment = { seq, audio: await bytesToBase64(wav, 'audio/wav'), start };
       if (!this.talk) return;
       this.queue.push(item);
-      await set(segKey(seq), item, store).catch(() => undefined);
+      await this.keep(segKey(seq), item);
       void this.pump();
     });
   }
@@ -322,8 +373,8 @@ export class SpeechSession {
           talk.words.push(...(res.words ?? []).map((w) => ({ text: w.text.slice(0, 100), start: item.start + w.start, end: item.start + w.end })));
           talk.segments.push(...(res.segments ?? []).map((s) => ({ ...s, text: s.text.slice(0, 2000), start: item.start + s.start, end: item.start + s.end })));
           this.queue.shift();
-          await set(TALK_KEY, talk, store).catch(() => undefined);
-          await del(segKey(item.seq), store).catch(() => undefined);
+          await this.keep(TALK_KEY, talk);
+          if (this.persist) await del(segKey(item.seq), store).catch(() => undefined);
           const live = computeSpeechMetrics({ frames: [], words: talk.words, segments: [], targetSeconds: null });
           this.set({ pending: this.queue.length, words: live.wordCount, fillers: live.fillers.count });
         } catch (err) {
@@ -339,19 +390,11 @@ export class SpeechSession {
     }
   }
 
-  private async save(frames: AcousticFrame[]): Promise<SpeechAttempt | null> {
+  private async save(recording: SpeechRecording): Promise<SpeechAttempt | null> {
     const talk = this.talk;
     if (!talk) return null;
     this.set({ status: 'saving', pending: 0 });
-    const words = [...talk.words].sort((a, b) => a.start - b.start);
-    const metrics = computeSpeechMetrics({
-      frames,
-      words,
-      segments: talk.segments,
-      targetSeconds: talk.setup.targetSeconds,
-      themeWords: talk.setup.themeWords,
-    });
-    if (metrics.durationSeconds === 0 && frames.length === 0) metrics.durationSeconds = Math.round(talk.elapsed * 100) / 100;
+    const { words, metrics, frames } = recording;
     for (;;) {
       try {
         const attempt = await endpoints.speech.create({
@@ -360,9 +403,10 @@ export class SpeechSession {
           speechType: talk.setup.speechType,
           topicId: talk.setup.topicId,
           theme: talk.setup.theme,
+          lessonId: talk.setup.lessonId ?? null,
           startedAt: talk.startedAt,
           localDay: talk.localDay,
-          transcript: talk.texts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 40_000),
+          transcript: recording.transcript,
           words,
           segments: talk.segments,
           timeline: toTimeline(frames),

@@ -123,6 +123,8 @@ export const zSpeechAttemptCreate = z.object({
   speechType: z.enum(SPEECH_TYPES),
   topicId: zId.nullable().default(null),
   theme: z.string().trim().max(300).default(''),
+  /** The lesson or challenge it was recorded in (null: free practice). */
+  lessonId: z.string().max(64).nullable().default(null),
   startedAt: zDateTime,
   /** Calendar day in the user's time zone (streaks are counted on it). */
   localDay: zDate,
@@ -148,6 +150,7 @@ export const zSpeechAttemptSummary = z.object({
   wpm: z.number(),
   fillersPerMinute: z.number(),
   pvq: z.number().nullable(),
+  lessonId: z.string().nullable(),
   createdAt: zDateTime,
 });
 export type SpeechAttemptSummary = z.infer<typeof zSpeechAttemptSummary>;

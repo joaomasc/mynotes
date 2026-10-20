@@ -138,7 +138,7 @@ test('records a talk, measures the voice in the browser and shows the evaluated 
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(stored) });
   });
 
-  await page.goto('/speaking');
+  await page.goto('/speaking/free');
   await page.getByRole('radio', { name: 'Fala livre' }).click();
   await page.getByLabel('Tema').fill('Mercantilismo em 1 minuto');
   await page.getByRole('button', { name: 'Começar a gravar' }).click();
@@ -174,7 +174,8 @@ test('records a talk, measures the voice in the browser and shows the evaluated 
   await page.getByText('Tom da voz').scrollIntoViewIfNeeded();
   await page.screenshot({ path: 'test-results/speaking-result-chart.png' });
 
-  // The talk is in the history.
+  // The talk is in the history, and free practice counts for the streak.
   await page.goto('/speaking');
   await expect(page.getByRole('link', { name: /Mercantilismo em 1 minuto/ })).toBeVisible();
+  await expect(page.getByText('recorde 1')).toBeVisible();
 });

@@ -1,5 +1,12 @@
 import { createRoute } from '@hono/zod-openapi';
+import { z } from 'zod';
 import {
+  zDate,
+  zSpeechFeedback,
+  zSpeechFeedbackRequest,
+  zSpeechPathState,
+  zSpeechPracticeCreate,
+  zSpeechPracticeResult,
   zPageQuery,
   zSpeechAttempt,
   zSpeechAttemptCreate,
@@ -9,6 +16,7 @@ import {
 } from '@mynotes/shared';
 import type { ApiApp } from '../../app';
 import { errors, idParam, jsonBody, noContent, ok, okPage, secured } from '../../lib/openapi';
+import { pathState, recordPractice } from './path';
 import * as speech from './service';
 
 const tags = ['Oratória'];
@@ -94,5 +102,49 @@ export function speechRoutes(app: ApiApp) {
       const attempt = await speech.evaluateAttempt(c.env, c.get('userId'), c.req.valid('param').id, c.req.valid('json'));
       return c.json({ data: attempt }, 200);
     },
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/speech/path',
+      tags,
+      summary: 'Estado da trilha: lições concluídas, habilidades, XP, meta diária, sequência de dias e tema do dia',
+      description: '`today` é a data no fuso do usuário (a sequência de dias conta dias locais).',
+      security: secured,
+      request: { query: z.object({ today: zDate }) },
+      responses: { 200: ok(zSpeechPathState), ...errors },
+    }),
+    async (c) => c.json({ data: await pathState(c.env.DB, c.get('userId'), c.req.valid('query').today) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/practice',
+      tags,
+      summary: 'Registrar uma prática (lição, desafio, revisão, aquecimento ou fala)',
+      description:
+        'O XP é calculado pela API a partir do conteúdo da trilha; as metas dos desafios são conferidas na fala salva (`attemptId`). ' +
+        'O mesmo `id` enviado de novo não conta duas vezes.',
+      security: secured,
+      request: { body: jsonBody(zSpeechPracticeCreate) },
+      responses: { 200: ok(zSpeechPracticeResult), ...errors },
+    }),
+    async (c) => c.json({ data: await recordPractice(c.env.DB, c.get('userId'), c.req.valid('json')) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'post',
+      path: '/speech/feedback',
+      tags,
+      summary: 'Correção de um exercício escrito pela IA (reescrever uma frase, escrever uma parte da fala)',
+      description: 'Usa a OpenAI e conta no orçamento diário da IA.',
+      security: secured,
+      request: { body: jsonBody(zSpeechFeedbackRequest) },
+      responses: { 200: ok(zSpeechFeedback), ...errors },
+    }),
+    async (c) => c.json({ data: await speech.writtenFeedback(c.env, c.get('userId'), c.req.valid('json')) }, 200),
   );
 }

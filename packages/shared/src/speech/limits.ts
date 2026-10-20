@@ -49,6 +49,23 @@ export interface SpeechLimits {
   timeAttention: number;
 }
 
+/** The limits with the user's calibration applied (settings “speech”). */
+export function calibratedLimits(o: { paceMin: number | null; paceMax: number | null; pvqGood: number | null; finalDropDb: number | null } | null | undefined): SpeechLimits {
+  const base = DEFAULT_SPEECH_LIMITS;
+  if (!o) return base;
+  const paceMin = o.paceMin ?? base.paceGood[0];
+  const paceMax = Math.max(paceMin + 10, o.paceMax ?? base.paceGood[1]);
+  const pvqGood = o.pvqGood ?? base.pvqGood;
+  return {
+    ...base,
+    paceGood: [paceMin, paceMax],
+    paceAttention: [paceMin - 20, paceMax + 20],
+    pvqGood,
+    pvqAttention: Math.min(base.pvqAttention, pvqGood * 0.7),
+    finalDropDb: o.finalDropDb ?? base.finalDropDb,
+  };
+}
+
 export const DEFAULT_SPEECH_LIMITS: SpeechLimits = {
   paceGood: [130, 160],
   paceAttention: [110, 180],

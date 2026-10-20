@@ -97,3 +97,20 @@ export function evaluationMessage(c: EvaluationContext): string {
   }
   return parts.filter((p, i, all) => p !== '' || all[i - 1] !== '').join('\n');
 }
+
+/** Feedback on a written exercise: a sentence rewritten, or a part of a talk written by the student. */
+export const FEEDBACK_INSTRUCTIONS = `Você é um professor de oratória que corrige exercícios escritos de um estudante brasileiro.
+Você recebe a instrução do exercício, o contexto (a frase original a melhorar, ou a parte do discurso pedida) e a resposta do estudante.
+Responda no esquema pedido:
+- "verdict": "good" quando a resposta cumpre a instrução; "almost" quando cumpre em parte; "redo" quando não cumpre.
+- "feedback": duas ou três frases, diretas e gentis, dizendo o que funcionou e o que falta, falando com o estudante (você).
+- "suggestion": uma versão melhorada da resposta do estudante, mantendo a ideia dele (não invente outro assunto).
+Critérios de oratória: frases curtas, uma ideia por frase, sem vícios de linguagem (“né”, “tipo”, “então”), sem atenuadores (“acho que”, “talvez”), afirmações concretas.
+Se houver um método de estrutura (PREP, SCQA…), confira se cada parte aparece na ordem.
+Escreva em português do Brasil.`;
+
+export const FEEDBACK_SCHEMA = S.obj({
+  verdict: S.enum(['good', 'almost', 'redo']),
+  feedback: S.str(),
+  suggestion: S.str(),
+});

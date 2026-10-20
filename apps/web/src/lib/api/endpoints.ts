@@ -55,6 +55,11 @@ import type {
   SpeechAttempt,
   SpeechAttemptCreate,
   SpeechAttemptSummary,
+  SpeechFeedback,
+  SpeechFeedbackRequest,
+  SpeechPathState,
+  SpeechPracticeCreate,
+  SpeechPracticeResult,
   StudySession,
   StudySessionCreate,
   StudySessionUpdate,
@@ -257,6 +262,9 @@ export const endpoints = {
     remove: (id: string) => api.del(`/speech/attempts/${id}`),
     evaluate: (id: string, force = false) =>
       api.post<SpeechAttempt>(`/speech/attempts/${id}/evaluate`, { force }, { retries: 0, track: false }),
+    path: (today: string) => api.get<SpeechPathState>('/speech/path', { today }),
+    practice: (body: SpeechPracticeCreate) => api.post<SpeechPracticeResult>('/speech/practice', body),
+    feedback: (body: SpeechFeedbackRequest) => api.post<SpeechFeedback>('/speech/feedback', body, { retries: 0, track: false }),
   },
 
   transcriptions: {

@@ -5,8 +5,14 @@ import {
   TEXT_AI_CRITERIA,
   evaluateMeasured,
   speechScore,
+  SPEECH_METHODS,
+  calibratedLimits,
   zSpeechEvaluation,
+  zSpeechFeedback,
   type CriterionResult,
+  type MethodId,
+  type SpeechFeedback,
+  type SpeechFeedbackRequest,
   type SpeechAttempt,
   type SpeechAttemptCreate,
   type SpeechAttemptSummary,
@@ -25,7 +31,8 @@ import { nowIso } from '../../lib/time';
 import { aiConfig, costOf, requireReady } from '../assistant/config';
 import { createResponse, outputText } from '../assistant/openai';
 import { assertWithinBudget, usageStatement } from '../assistant/usage';
-import { COACH_INSTRUCTIONS, EVALUATION_SCHEMA, evaluationMessage, timedTranscript } from './prompt';
+import { speechSettings } from './path';
+import { COACH_INSTRUCTIONS, EVALUATION_SCHEMA, FEEDBACK_INSTRUCTIONS, FEEDBACK_SCHEMA, evaluationMessage, timedTranscript } from './prompt';
 
 /* --------------------------------------------------------------- rows -- */
 
@@ -44,6 +51,7 @@ function toSummary(r: Row): SpeechAttemptSummary {
     wpm: num(r.wpm),
     fillersPerMinute: num(r.fillers_per_minute),
     pvq: numOrNull(r.pvq),
+    lessonId: strOrNull(r.lesson_id),
     createdAt: str(r.created_at),
   };
 }
@@ -78,7 +86,7 @@ export async function getAttempt(db: D1Database, userId: string, id: string): Pr
 
 const SORT: SortSpec = { expr: 'started_at', field: 'started_at', dir: 'DESC' };
 const SUMMARY_COLUMNS =
-  'id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds, score, wpm, fillers_per_minute, pvq, created_at, ' +
+  'id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds, score, wpm, fillers_per_minute, pvq, lesson_id, created_at, ' +
   'CASE WHEN evaluation_json IS NULL THEN NULL ELSE 1 END AS evaluation_json';
 
 export async function listAttempts(
@@ -123,14 +131,15 @@ export async function createAttempt(
   await assertReference(db, 'topics', input.topicId, userId);
   if (input.timeline.db.length !== input.timeline.f0.length) throw badRequest('Linha do tempo inconsistente');
 
-  const measured = evaluateMeasured(input.metrics);
+  const settings = await speechSettings(db, userId);
+  const measured = evaluateMeasured(input.metrics, calibratedLimits(settings.limits));
   const now = nowIso();
   await run(
     db,
     `INSERT INTO speech_attempts (id, user_id, mode, speech_type, topic_id, theme, started_at, local_day, duration_seconds,
        transcript, words_json, segments_json, timeline_json, metrics_json, measured_json, evaluation_json, score,
-       rubric_version, wpm, fillers_per_minute, pvq, version, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       rubric_version, wpm, fillers_per_minute, pvq, lesson_id, version, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     input.id,
     userId,
     input.mode,
@@ -151,6 +160,7 @@ export async function createAttempt(
     input.metrics.pace.wpm,
     input.metrics.fillers.perMinute,
     input.metrics.pitch.pvq,
+    input.lessonId,
     now,
     now,
   );
@@ -316,4 +326,40 @@ export async function evaluateAttempt(env: Env, userId: string, id: string, inpu
     }),
   );
   return getAttempt(db, userId, id);
+}
+
+/* ----------------------------------------------------------- feedback -- */
+
+/** The model checks a written exercise (fix a sentence, write a part of a talk). Counts against the daily budget. */
+export async function writtenFeedback(env: Env, userId: string, input: Required<Omit<SpeechFeedbackRequest, 'method'>> & { method: string | null }): Promise<SpeechFeedback> {
+  const cfg = requireReady(aiConfig(env));
+  const today = nowIso().slice(0, 10);
+  await assertWithinBudget(env.DB, userId, cfg, today);
+  const method = input.method && input.method in SPEECH_METHODS ? SPEECH_METHODS[input.method as MethodId] : null;
+  const message = [
+    `Exercício: ${input.kind === 'fix' ? 'reescrever uma frase' : 'escrever uma parte de uma fala'}.`,
+    `Instrução: ${input.instruction}`,
+    `${input.kind === 'fix' ? 'Frase original' : 'Parte pedida'}: ${input.context}`,
+    method ? `Método: ${method.name} (${method.parts.map((p) => p.name).join(' → ')}).` : '',
+    `Resposta do estudante: ${input.answer}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const res = await createResponse(cfg, {
+    instructions: FEEDBACK_INSTRUCTIONS,
+    input: [{ role: 'user', content: message }],
+    tools: [],
+    toolChoice: 'none',
+    textFormat: { name: 'exercise_feedback', schema: FEEDBACK_SCHEMA },
+    maxOutputTokens: Math.max(cfg.maxOutputTokens, 1500),
+  });
+  await usageStatement(env.DB, userId, today, res.usage, costOf(res.usage, cfg.prices), 1).run();
+  try {
+    if (res.status !== 'completed') throw new Error(res.incompleteReason ?? res.status);
+    const parsed = zSpeechFeedback.parse(JSON.parse(outputText(res.output)));
+    return { verdict: parsed.verdict, feedback: parsed.feedback.trim().slice(0, 2000), suggestion: parsed.suggestion.trim().slice(0, 2000) };
+  } catch (err) {
+    console.error(JSON.stringify({ level: 'error', msg: 'speech feedback unusable', status: res.status, error: String(err).slice(0, 200) }));
+    throw new ApiError('service_unavailable', 'A correção da IA veio incompleta. Tente de novo.');
+  }
 }

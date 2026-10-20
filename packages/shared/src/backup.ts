@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BACKUP_FORMAT, BACKUP_FORMAT_VERSION } from './constants';
 import { zDate, zDateTime, zId } from './schemas/common';
+import { SETTING_KEYS, type SettingKey } from './schemas/knowledge';
 
 /**
  * Backup format (version 1)
@@ -278,7 +279,50 @@ export const BACKUP_TABLES = {
       wpm: z.number().min(0),
       fillers_per_minute: z.number().min(0),
       pvq: z.number().min(0).nullable(),
+      lesson_id: str(64).nullable().default(null),
       ...versioned,
+    }),
+  },
+  speech_practice: {
+    hasUserId: true,
+    mergeByUpdatedAt: false,
+    row: z.object({
+      id: zId,
+      kind: z.enum(['lesson', 'challenge', 'levelChallenge', 'review', 'warmup', 'daily', 'free']),
+      ref_id: nullableStr(64),
+      local_day: zDate,
+      seconds: int.min(0),
+      xp: int.min(0),
+      passed: int.min(0).max(1),
+      attempt_id: zId.nullable(),
+      created_at: ts,
+    }),
+  },
+  speech_progress: {
+    hasUserId: true,
+    mergeByUpdatedAt: true,
+    primaryKey: 'item_id',
+    row: z.object({
+      item_id: str(64),
+      attempts: int.min(0),
+      best_score: int.min(0).max(100).nullable(),
+      completed_at: ts.nullable(),
+      version: int.min(1),
+      updated_at: ts,
+    }),
+  },
+  speech_skills: {
+    hasUserId: true,
+    mergeByUpdatedAt: true,
+    primaryKey: 'skill',
+    row: z.object({
+      skill: str(32),
+      xp: int.min(0),
+      level: int.min(0).max(5),
+      last_practiced_on: zDate.nullable(),
+      next_review_on: zDate.nullable(),
+      version: int.min(1),
+      updated_at: ts,
     }),
   },
   settings: {
@@ -286,7 +330,8 @@ export const BACKUP_TABLES = {
     mergeByUpdatedAt: true,
     primaryKey: 'key',
     row: z.object({
-      key: z.enum(['ui', 'study_timer', 'study_goals']),
+      // Every key the app saves (a fixed list here once rejected backups with the note settings).
+      key: z.enum(SETTING_KEYS as [SettingKey, ...SettingKey[]]),
       value: str(100_000),
       version: int.min(1),
       updated_at: ts,

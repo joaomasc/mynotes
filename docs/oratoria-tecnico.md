@@ -192,14 +192,15 @@ Migração `apps/api/migrations/0005_speech.sql`. Todas as tabelas têm `user_id
 | Tabela | Conteúdo |
 |---|---|
 | `speech_attempts` | Uma fala gravada: `kind` (`lesson`, `challenge`, `daily`, `free`, `project`), `lesson_id`, `topic_id`/`note_id` (explicar um assunto), `project_id`, `speech_type`, `method`, meta e duração, `transcript`, `words_json` (palavras com tempos), `timeline_json` (linha do tempo reduzida), `metrics_json`, `evaluation_json` (estados e textos da IA), `full_evaluation_json`, `score`, `rubric_version`, `audio_document_id` (opcional), `local_day` (data no fuso do usuário), `created_at` |
-| `speech_lesson_progress` | Por lição: `status`, `attempts`, `best_score`, `completed_at` |
-| `speech_skill_levels` | Por habilidade: `level` (0–5), `xp`, `last_practiced_at`, `next_review_on` |
+| `speech_progress` | Por lição, desafio de unidade ou desafio de nível (`item_id`): `attempts`, `best_score`, `completed_at` |
+| `speech_skills` | Por habilidade: `level` (0–5), `xp`, `last_practiced_on`, `next_review_on` |
+| `speech_practice` | Cada prática (lição, desafio, revisão, aquecimento, Discurso do Dia, treino livre): `kind`, `ref_id`, `local_day`, `seconds`, `xp`, `passed`, `attempt_id` |
 | `speech_projects` | Discursos do nível 4: `speech_type`, `title`, `audience`, `goal`, `method`, `step`, `note_id` (o discurso é uma nota), datas |
 | `speech_exercise_variants` | Cache das variações geradas: `template_id`, `content_json`, `used_count`. Fora do backup |
 
 Configurações (na tabela `settings` que já existe): meta diária, horário do lembrete, listas de vícios e de palavras fracas, guardar áudio (sim/não) e os limites calibrados.
 
-**XP, meta diária e sequência de dias** são calculados a partir de `speech_attempts.local_day` e da duração, sem tabela própria: menos estado para ficar inconsistente. A folga semanal é uma regra do cálculo (um dia sem prática por semana ISO não quebra a sequência). O dia é o **local**, enviado pelo app, porque “hoje” às 22h em Brasília já é amanhã em UTC.
+**XP, meta diária e sequência de dias** são calculados a partir de `speech_practice` (exercícios sem gravação, como conceitos e múltipla escolha, também contam). O XP é calculado pela API a partir do conteúdo da trilha, e as metas dos desafios são conferidas na fala salva: o app nunca informa o próprio XP. A folga semanal é uma regra do cálculo (um dia sem prática por semana ISO não quebra a sequência). O dia é o **local**, enviado pelo app, porque “hoje” às 22h em Brasília já é amanhã em UTC.
 
 ## API
 
@@ -207,14 +208,14 @@ Novo módulo `apps/api/src/modules/speech/` (`routes.ts` + `service.ts`), regist
 
 | Rota | O que faz |
 |---|---|
-| `GET speech/path` | Trilha com progresso, níveis de habilidade, revisões vencidas, XP e sequência de dias |
-| `GET speech/today` | Sessão do dia: aquecimento, próxima lição ou revisão, Discurso do Dia |
+| `GET speech/path?today=` | Lições e desafios concluídos, habilidades, XP total e do dia, minutos do dia, sequência, XP da semana, tema do Discurso do Dia e uma nota para explicar (o aquecimento e as revisões são montados no app a partir do conteúdo compartilhado) |
+| `POST speech/practice` | Registra uma prática; responde com o XP, se passou e o novo estado |
 | `POST speech/attempts` | Salva uma fala (transcrição, palavras, linha do tempo, métricas); recalcula os estados medidos; atualiza progresso e habilidades |
 | `GET speech/attempts`, `GET speech/attempts/{id}`, `DELETE speech/attempts/{id}` | Histórico e detalhe |
 | `POST speech/attempts/{id}/evaluate` | Avaliação de texto pela IA |
 | `POST speech/attempts/{id}/full-evaluation` | Avaliação completa com áudio |
 | `POST speech/exercises/{template}/variants` | Gera e guarda variações de um modelo de exercício |
-| `POST speech/fix` | Corrige uma frase do exercício “Consertar” |
+| `POST speech/feedback` | Corrige um exercício escrito (“Consertar” e “Construir”) |
 | `GET/POST/PATCH speech/projects`, `GET speech/projects/{id}` | Discursos do nível 4 |
 | `POST transcriptions` (existente) | Ganha `detail: "words"` |
 
@@ -294,7 +295,7 @@ No **painel inicial**, um cartão “Oratória” mostra a sequência de dias e 
 | Etapa | Entrega | Pronto quando |
 |---|---|---|
 | **1. Motor de análise** ✓ | Gravador com opções de captura e fila em IndexedDB; Analisador acústico; transcrição com `detail: "words"`; métricas; régua como dados; tela de resultado; fala livre e “explicar um assunto”; avaliação de texto pela IA; histórico | Uma fala de 2 minutos gera resultado completo e explicado; as gravações de calibração apontam os problemas certos |
-| **2. Calibração e nível 1** | Linha de base (unidade 1) e ajuste dos limites; conteúdo do nível 1; player de lições com todos os tipos de exercício; XP, meta diária e sequência de dias; aquecimento e Discurso do Dia; cartão no painel | Dá para fazer a sessão diária completa do nível 1 no celular |
+| **2. Calibração e nível 1** ✓ | Linha de base (unidade 1) e ajuste dos limites; conteúdo do nível 1; player de lições com todos os tipos de exercício; XP, meta diária e sequência de dias; aquecimento e Discurso do Dia; cartão no painel | Dá para fazer a sessão diária completa do nível 1 no celular |
 | **3. Níveis 2 e 3** | Conteúdo; biblioteca de métodos; banca de perguntas; níveis de habilidade e lições de revisão; variações geradas pela IA; desafios de nível | A trilha até a unidade 16 funciona com revisões automáticas |
 | **4. Discurso próprio** | Nível 4 com projetos ligados a notas; ensaios comparados; avaliação completa com áudio; guardar áudio; lembrete por Web Push | Um discurso vai da ideia à apresentação final dentro do app |
 
@@ -319,3 +320,11 @@ A etapa 1 já é útil sozinha (treino livre com retorno detalhado) e valida a p
 | Safari (iPhone) com restrições de áudio e de tela bloqueada | O ditado já trata o gesto do usuário e a tela acesa; testar o Analisador e o `MediaRecorder` no Safari na etapa 1 |
 | Modelo de áudio da OpenAI: disponibilidade, formato e preço | Confirmar antes da etapa 4; a avaliação completa é opcional e o resto não depende dela |
 | Limites genéricos não servirem para a sua voz | Calibração na unidade 1 e limites editáveis; a evolução compara você com você mesmo |
+
+**Etapa 2 entregue** (`/speaking` virou a trilha; `/speaking/lesson/:id`, `/speaking/free`, `/speaking/progress`):
+
+- Conteúdo do nível 1 em `packages/shared/src/speech/content/level1.ts`, com metas por lição e desafio; o motor de progresso (sequência com folga semanal, XP, revisões espaçadas) em `speech/path.ts`.
+- A calibração é manual com sugestão: a página de progresso propõe limites a partir da mediana das suas falas (ritmo ±15 palavras/min, monotonia a 85% da sua variação de tom) e você confirma. Não há ajuste automático.
+- O Discurso do Dia alterna, dia sim dia não, entre um tema geral e uma nota sua (com assunto, a fala é avaliada contra as notas).
+- Correção encontrada no caminho: o backup recusava a configuração `notes` (nota diária); a lista de chaves passou a vir das configurações do app.
+
