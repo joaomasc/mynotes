@@ -1,4 +1,5 @@
 import type { RouteModule } from '../app';
+import { assistantRoutes } from './assistant/routes';
 import { backupRoutes } from './backup/routes';
 import { documentRoutes } from './documents/routes';
 import { knowledgeRoutes } from './knowledge/routes';
@@ -26,4 +27,5 @@ export const routeModules: RouteModule[] = [
   referenceRoutes,
   backupRoutes,
   transcriptionRoutes,
+  assistantRoutes,
 ];

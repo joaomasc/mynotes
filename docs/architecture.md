@@ -35,6 +35,7 @@
 | search, dashboard, favorites, activity, settings, trash | transversais |
 | backup | `manifest`, `export/{tabela}`, `imports` (+ `chunks`, `commit`) |
 | transcriptions | `POST transcriptions`: um trecho de ditado (WAV em base64) → texto, via Workers AI |
+| assistant | `ai/status`, `ai/chat`, `ai/conversations` (+ `{id}`, `DELETE`), `ai/actions/{id}/confirm` e `/reject`: assistente com ferramentas sobre os dados reais, via OpenAI Responses API ([ai.md](ai.md)) |
 
 Documentação viva: `GET /api/v1/docs` (Scalar) e `GET /api/v1/openapi.json`.
 
@@ -55,6 +56,7 @@ Formato das respostas: `{ "data": … }`; listas paginadas `{ "data": [...], "me
 | `favorites`, `activity_events`, `settings` | Transversais. |
 | `view_layouts` | Disposição visual de visualizações geradas (posições e ramos recolhidos do mapa mental de um assunto). Nunca é lida para inferir hierarquia ou relações. |
 | `idempotency_keys`, `import_jobs`, `import_chunks`, `import_guard` | Infraestrutura de sincronização e backup. |
+| `ai_conversations`, `ai_messages`, `ai_actions`, `ai_usage_daily` | Assistente de IA (migração 0003): conversas, mensagens com fontes e atividade (sem resultados brutos de ferramentas), propostas/ações executadas (auditoria) e consumo diário. Não guardam conhecimento próprio nem entram no backup. |
 
 Regras de integridade:
 

@@ -11,10 +11,12 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ai-live": "vitest run --config vitest.live.config.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:migrations:list": "wrangler d1 migrations list DB --remote",
-    "create-user": "node scripts/create-user.mjs"
+    "create-user": "node scripts/create-user.mjs",
+    "ai:check": "node scripts/ai-check.mjs"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",

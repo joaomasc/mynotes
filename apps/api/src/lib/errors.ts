@@ -14,6 +14,7 @@ const STATUS: Record<ApiErrorCode, number> = {
   idempotency_conflict: 422,
   rate_limited: 429,
   internal_error: 500,
+  service_unavailable: 503,
 };
 
 /** An error that is safe to show to the client. */

@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth/session';
 import { API_BASE, APP_VERSION } from '@/lib/config';
 import { readThemePreference, type ThemePreference } from '@/theme-boot';
 import { PasswordForm, SessionsList } from './account-section';
+import { AiSection } from './ai-section';
 import { BackupSection } from './backup-section';
 import { HotkeysSection } from './hotkeys-section';
 import { NotesSection } from './notes-section';
@@ -92,6 +93,7 @@ export function Component() {
           ['estudos', 'Estudos'],
           ['conta', 'Conta e segurança'],
           ['backup', 'Backup'],
+          ['ia', 'Assistente de IA'],
           ['sobre', 'Sobre'],
         ].map(([id, label]) => (
           <a key={id} href={`#${id}`} className="shrink-0 rounded-lg px-3 py-1.5 text-muted hover:bg-surface-2 hover:text-text">
@@ -134,6 +136,9 @@ export function Component() {
         </Block>
         <Block id="backup" title="Backup e recuperação">
           <BackupSection />
+        </Block>
+        <Block id="ia" title="Assistente de IA" description="Consumo real da OpenAI API e limites configurados no servidor. A chave nunca chega ao navegador.">
+          <AiSection />
         </Block>
         <Card className="flex items-center justify-between gap-3 p-5">
           <div>

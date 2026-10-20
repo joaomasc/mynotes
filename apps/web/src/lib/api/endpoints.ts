@@ -1,5 +1,11 @@
 import type {
   ActivityEvent,
+  AiActionDecision,
+  AiChatRequest,
+  AiChatResponse,
+  AiConversation,
+  AiConversationSummary,
+  AiStatus,
   Backlink,
   BrokenReference,
   BackupManifest,
@@ -241,5 +247,19 @@ export const endpoints = {
   transcriptions: {
     /** One dictated segment; not counted in the sync indicator (nothing is saved). */
     create: (body: TranscriptionCreate) => api.post<Transcription>('/transcriptions', body, { track: false }),
+  },
+
+  ai: {
+    status: () => api.get<AiStatus>('/ai/status'),
+    /**
+     * One chat turn. Never retried automatically (a turn costs tokens); the
+     * user retries with the same messageId, which the API answers only once.
+     */
+    chat: (body: AiChatRequest) => api.post<AiChatResponse>('/ai/chat', body, { retries: 0, track: false }),
+    conversations: () => api.get<AiConversationSummary[]>('/ai/conversations'),
+    conversation: (id: string) => api.get<AiConversation>(`/ai/conversations/${id}`),
+    removeConversation: (id: string) => api.del(`/ai/conversations/${id}`),
+    confirm: (actionId: string) => api.post<AiActionDecision>(`/ai/actions/${actionId}/confirm`, {}, { retries: 0 }),
+    reject: (actionId: string) => api.post<AiActionDecision>(`/ai/actions/${actionId}/reject`, {}, { retries: 0 }),
   },
 };

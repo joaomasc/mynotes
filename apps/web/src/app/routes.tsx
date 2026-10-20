@@ -25,6 +25,7 @@ export const pageRoutes: RouteObject[] = [
   { path: 'graph', ...page(() => import('@/features/graph/graph-page')) },
   { path: 'concepts/:id', ...page(() => import('@/features/concepts/concept-page')) },
   { path: 'search', ...page(() => import('@/features/search/search-page')) },
+  { path: 'assistant', ...page(() => import('@/features/assistant/assistant-page')) },
   { path: 'settings', ...page(() => import('@/features/settings/settings-page')) },
   { path: 'trash', ...page(() => import('@/features/settings/trash-page')) },
   { path: '*', element: <Navigate to="/" replace /> },

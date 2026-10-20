@@ -35,6 +35,14 @@ Segredo (fica cifrado na Cloudflare; nunca vai para o repositório):
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" | npx wrangler secret put AUTH_SECRET
 ```
 
+Assistente de IA (opcional; sem ele o resto do app funciona normalmente). A chave é pedida no terminal e fica cifrada na Cloudflare:
+
+```bash
+npx wrangler secret put OPENAI_API_KEY
+```
+
+Modelo, limites e orçamento ficam em `vars` no `wrangler.jsonc` (veja [ai.md](ai.md#variáveis)). A migração `0003_ai_assistant.sql` só cria tabelas novas e passa pela verificação de migrações destrutivas.
+
 `AUTH_SECRET` assina os desafios de renovação, os links de arquivo e os parâmetros falsos de login. Trocá-lo invalida links e desafios em andamento, mas **não** encerra sessões nem altera senhas.
 
 Migrações, deploy e conta:

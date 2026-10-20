@@ -8,4 +8,6 @@ export * from './schemas/auth';
 export * from './schemas/content';
 export * from './schemas/knowledge';
 export * from './schemas/transcription';
+export * from './schemas/assistant';
 export * from './backup';
+export * from './markdown';

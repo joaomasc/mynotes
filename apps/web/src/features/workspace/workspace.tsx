@@ -25,6 +25,7 @@ import {
   Rows2,
   Search,
   Settings,
+  Sparkles,
   StickyNote,
   Trash,
   Waypoints,
@@ -56,6 +57,7 @@ const ICONS: Record<string, ComponentType<LucideProps>> = {
   topic: FolderTree,
   document: FileText,
   concept: Lightbulb,
+  assistant: Sparkles,
 };
 
 export function useWorkspace() {

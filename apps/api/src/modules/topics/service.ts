@@ -24,7 +24,7 @@ export function toTopic(r: Row): Topic {
   };
 }
 
-const topicSearchText = (title: string, description: string) =>
+export const topicSearchText = (title: string, description: string) =>
   normalizeAligned(`${title.normalize('NFC')} ${description.normalize('NFC')}`);
 
 const siblingScope = (userId: string, parentId: string | null, excludeId?: string) => ({

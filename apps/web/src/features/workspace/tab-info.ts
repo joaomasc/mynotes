@@ -25,6 +25,7 @@ const FIXED: [string, string, string][] = [
   ['/maps', 'Mapas livres', 'mindmap'],
   ['/graph', 'Grafo', 'graph'],
   ['/search', 'Busca', 'search'],
+  ['/assistant', 'Assistente', 'assistant'],
   ['/settings', 'Configurações', 'settings'],
   ['/trash', 'Lixeira', 'trash'],
 ];

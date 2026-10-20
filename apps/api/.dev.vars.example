@@ -3,3 +3,11 @@ ENVIRONMENT=development
 ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173
 # Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 AUTH_SECRET=replace-with-a-random-32-byte-secret
+
+# AI assistant — key from https://platform.openai.com/api-keys (the value below is FAKE).
+# Check it without spending credit: npm run ai:check -w @mynotes/api
+OPENAI_API_KEY=sk-proj-EXEMPLO-FICTICIO-substitua-pela-sua-chave
+# Optional overrides of the defaults in wrangler.jsonc ("vars"):
+# OPENAI_MODEL=gpt-6-luna
+# AI_ENABLED=false
+# AI_DAILY_BUDGET_USD=0.20

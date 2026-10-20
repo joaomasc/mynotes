@@ -1,12 +1,13 @@
 # MyNotes
 
-Ambiente pessoal de conhecimento e estudos: assuntos hierárquicos, notas, biblioteca de PDFs, leituras, planos, diário de estudos, mapas mentais e grafo de conhecimento — com conta única, sincronização entre notebook e celular e backup completo.
+Ambiente pessoal de conhecimento e estudos: assuntos hierárquicos, notas, biblioteca de PDFs, leituras, planos, diário de estudos, mapas mentais, grafo de conhecimento e um assistente de IA que consulta e organiza o seu conteúdo — com conta única, sincronização entre notebook e celular e backup completo.
 
 - **Frontend:** React 19 + TypeScript + Vite + Tailwind, publicado no **GitHub Pages** (PWA instalável).
 - **Backend:** API REST em **Cloudflare Workers** (Hono + Zod/OpenAPI), banco **D1**, arquivos no **R2**.
+- **IA:** OpenAI Responses API chamada só pelo Worker (a chave nunca vai para o navegador). Veja [docs/ai.md](docs/ai.md).
 - **Fonte oficial dos dados:** o servidor. O navegador mantém apenas cache de leitura e rascunhos de notas ainda não enviados.
 
-> Documentação detalhada: [arquitetura](docs/architecture.md) · [segurança](docs/security.md) · [sincronização e conflitos](docs/sync.md) · [backup e recuperação](docs/backup.md) · [publicação](docs/deploy.md)
+> Documentação detalhada: [arquitetura](docs/architecture.md) · [assistente de IA](docs/ai.md) · [segurança](docs/security.md) · [sincronização e conflitos](docs/sync.md) · [backup e recuperação](docs/backup.md) · [publicação](docs/deploy.md)
 
 ---
 
@@ -38,6 +39,7 @@ Ambiente pessoal de conhecimento e estudos: assuntos hierárquicos, notas, bibli
 | **Livros e leituras** | Na Biblioteca. Cada livro é um espaço de estudo: leitor de PDF integrado que lembra a página atual (com “Maximizar PDF”: o PDF ocupa a aba e as anotações abrem num painel ao lado, seguindo a página e o trecho selecionado), anotações por página (resumo, interpretação, crítica, dúvida, citação — tipo opcional), trecho selecionado no PDF como citação, “Minha resenha”, assuntos relacionados e “citado em”. Planos de leitura com etapas, prazos e progresso. |
 | **Diário de estudos** | Fora da navegação principal, sem perda de dados: tempo por assunto e “Registrar sessão” na página de cada assunto; histórico completo em `/study` (link em Configurações). |
 | **Conhecimento** | Grafo gerado dos dados (hierarquia, referências, anotações e relações), desenhado em canvas com simulação de forças ao vivo (cada grupo de itens ligados forma um grafo à parte, centrado no seu assunto raiz, e os itens soltos ficam num anel em volta; arrastar puxa os vizinhos, passar o mouse destaca as ligações, nós crescem com o número de ligações, rótulos aparecem com o zoom), foco num item, expansão progressiva, entradas/saídas, filtros (itens sem ligações, tags como nós), grupos de cor por busca (`#tag`, `assunto:…`, `tipo:…`), forças ajustáveis, linha do tempo e criação/remoção de relações; grafo local no painel direito; mapa mental gerado de cada assunto, com ramos recolhíveis, clique que ilumina a cadeia de conexões (caminho até a raiz, ramo abaixo e relações em sequência), “Abrir” ao lado mantendo o mapa à esquerda, disposição salva à parte e relações conceituais que não alteram a hierarquia. Mapas livres continuam disponíveis, com notas como cartões (mostram o texto) e links soltos sobre o mapa. |
+| **Assistente de IA** | Painel “Assistente” à direita (segue a aba aberta: nota, assunto, livro, mapa do assunto ou grafo focado) e página **/assistant** no celular (Alt+I). Responde a partir das suas notas, com links para as fontes reais, e diz quando usou só conhecimento geral. Cria notas e anotações, acrescenta texto, renomeia, cria assuntos e árvores de subassuntos (reaproveitando os que já existem), cria relações no grafo, encontra caminhos entre itens e propõe mapas mentais. Lotes, reescritas e mudanças de hierarquia aparecem como **prévia para confirmar**; nada é excluído. Limites por minuto, por mensagem e orçamento diário; consumo real em Configurações. |
 | **Painel e busca** | Continuar de onde parou, notas recentes, leituras em andamento e atrasadas, próximas metas, favoritos, assuntos. Busca global sem acentos (Ctrl/⌘+K) em assuntos, notas, livros, anotações de página, resenhas e tags (`#tag`). |
 | **Backup** | Exportação ZIP (JSON por tabela + arquivos) e importação validada e atômica, em modo mesclar ou substituir. |
 | **Área de trabalho** (telas ≥ 1024 px) | Abas e painéis lado a lado ou empilhados, como no Obsidian: cada aba tem o próprio histórico (voltar/avançar, inclusive pelo botão do navegador), abas fixadas, arrastar abas entre painéis ou para a borda de um painel (divide a tela), divisores redimensionáveis, reabrir aba fechada, disposições salvas por nome. Ctrl+clique (ou botão do meio) abre um link em nova aba; Ctrl+Alt+clique, ao lado. Painel direito ligado à aba ativa: menções (vinculadas e **não vinculadas**, com “Vincular”), sumário da nota, grafo local e árvore de tags (`#pai/filho`). A disposição é guardada por aparelho. |
@@ -71,6 +73,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 npm run db:migrate:local -w @mynotes/api      # cria o banco D1 local (.wrangler/)
 npm run dev:api                               # http://localhost:8787  (docs: /api/v1/docs)
 # ditado local: `npx wrangler login` e `npm run dev:ai -w @mynotes/api` (usa o Workers AI da sua conta)
+# assistente de IA (opcional): coloque OPENAI_API_KEY=sk-... em apps/api/.dev.vars e confira sem gastar crédito:
+npm run ai:check -w @mynotes/api              # valida chave e modelo (gratuito); `-- --ping` faz 1 chamada mínima
 
 # 2) Conta (em outro terminal) — veja a seção seguinte
 npm run create-user -w @mynotes/api -- --username seu_usuario
@@ -107,6 +111,7 @@ npm run typecheck     # tsc em shared, api e web
 npm test              # unitários (shared, web) + API completa no runtime Workers (D1/R2 locais)
 npm run build         # build de produção do frontend
 npm run test:e2e      # Playwright: API real + build de produção (1ª vez: npx playwright install chromium)
+npm run test:ai-live -w @mynotes/api   # opcional: 3 turnos REAIS do assistente contra a OpenAI (≈ US$ 0,001)
 ```
 
 Cobertura principal: criação de conta, login/logout/expiração/renovação/replay, proteção de **todas** as rotas privadas (gerada a partir do OpenAPI), CORS, validação e erros, CRUD e hierarquia profunda de assuntos, notas com conflito de versão e idempotência, upload/download/Range/links assinados/purga no R2, leituras, planos, sessões, relações, mapas, grafo, busca, configurações, backup (ida e volta, mesclagem, substituição, rejeição atômica de dados inconsistentes) e, no navegador, salvamento automático, recarregar imediatamente após digitar, edição offline, conflito entre dispositivos, PDF, backup e layout móvel.
@@ -115,7 +120,7 @@ Cobertura principal: criação de conta, login/logout/expiração/renovação/re
 
 O passo a passo completo está em [docs/deploy.md](docs/deploy.md).
 
-1. **Cloudflare:** `npx wrangler login` → `npx wrangler d1 create mynotes` (copie o `database_id` para `apps/api/wrangler.jsonc`) → `npx wrangler r2 bucket create mynotes-files` → ajuste `ALLOWED_ORIGINS` em `wrangler.jsonc` → `npx wrangler secret put AUTH_SECRET` → `npm run db:migrate:remote -w @mynotes/api` → `npm run deploy -w @mynotes/api` → crie a conta com `--remote`.
+1. **Cloudflare:** `npx wrangler login` → `npx wrangler d1 create mynotes` (copie o `database_id` para `apps/api/wrangler.jsonc`) → `npx wrangler r2 bucket create mynotes-files` → ajuste `ALLOWED_ORIGINS` em `wrangler.jsonc` → `npx wrangler secret put AUTH_SECRET` → (assistente, opcional) `npx wrangler secret put OPENAI_API_KEY` → `npm run db:migrate:remote -w @mynotes/api` → `npm run deploy -w @mynotes/api` → crie a conta com `--remote`.
 2. **GitHub Pages:** em *Settings › Pages*, fonte **GitHub Actions**; em *Settings › Secrets and variables › Actions › Variables*, defina `MYNOTES_API_URL` (URL do Worker) e, se usar domínio próprio ou repositório `<usuário>.github.io`, `MYNOTES_BASE_PATH=/`. Cada push em `main` publica o frontend.
 3. **Worker pelo GitHub (opcional):** secrets `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID` e o workflow manual *Publicar API*, que verifica as migrações pendentes e bloqueia migrações destrutivas sem confirmação explícita.
 
@@ -137,7 +142,7 @@ A origem é só esquema + host (+ porta): para `https://seu-usuario.github.io/my
 - Autorização verificada no servidor em todas as rotas privadas (negação por padrão); cada consulta é filtrada pelo dono.
 - R2 privado: sem URLs públicas permanentes; download autenticado ou link HMAC de 5 minutos.
 - CSP no frontend, cabeçalhos de segurança na API, validação Zod de todas as entradas, logs sem corpo de requisições, tokens ou conteúdo.
-- Segredos: apenas `AUTH_SECRET` (Wrangler secret). Nada sensível em arquivos versionados ou em variáveis `VITE_*` — tudo que vai para o frontend é público.
+- Segredos: `AUTH_SECRET` e, para o assistente, `OPENAI_API_KEY` (Wrangler secrets; localmente em `apps/api/.dev.vars`, ignorado pelo git). Nada sensível em arquivos versionados ou em variáveis `VITE_*` — tudo que vai para o frontend é público.
 
 Detalhes, modelo de ameaças e alternativas (como cookies com domínio próprio) em [docs/security.md](docs/security.md).
 
@@ -178,6 +183,7 @@ Coisas que **não** foram feitas (ou foram feitas de forma simplificada) nesta p
 - **Histórico de notas:** uma versão a cada 10 minutos de edição, até 50 por nota.
 - **Lixeira:** não é esvaziada automaticamente.
 - **Ditado:** precisa de conexão (sem ela, os trechos esperam na memória enquanto a página estiver aberta). O áudio não é guardado, só o texto. Fechar a nota antes de o último trecho chegar descarta esse trecho. No celular, a gravação para se a tela bloquear ou o app for para segundo plano (o app pede para manter a tela acesa durante o ditado).
+- **Assistente de IA:** sem leitura do texto dos PDFs, sem busca semântica e sem streaming; detalhes em [docs/ai.md](docs/ai.md#limitações-conhecidas).
 - **Proteção contra abuso:** a API limita tentativas de login; para proteção extra contra volume, configure uma regra de *rate limiting* da Cloudflare (WAF) para a rota do Worker.
 
 ## Solução de problemas
@@ -189,4 +195,5 @@ Coisas que **não** foram feitas (ou foram feitas de forma simplificada) nesta p
 | Telas em branco após publicar | `BASE_PATH` diferente do caminho real do Pages; ajuste `MYNOTES_BASE_PATH`. |
 | “Uma nova versão do MyNotes foi publicada” | Recarregue: os arquivos antigos foram substituídos pelo novo deploy. |
 | Sessão some ao abrir em outro navegador | Esperado: cada navegador tem sua própria chave e precisa entrar uma vez. |
+| “O assistente de IA não está configurado” / outros erros da IA | Veja [docs/ai.md › Solução de problemas](docs/ai.md#solução-de-problemas) e rode `npm run ai:check -w @mynotes/api`. |
 | Esqueci a senha | `npm run create-user -w @mynotes/api -- --username <usuário> --reset-password --remote`. |

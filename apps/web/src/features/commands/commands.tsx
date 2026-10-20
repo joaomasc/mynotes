@@ -29,6 +29,7 @@ import {
   Rows2,
   Search,
   Settings,
+  Sparkles,
   SquareSplitHorizontal,
   StickyNote,
   SunMoon,
@@ -43,6 +44,8 @@ import { effectiveHotkey, eventToHotkey, useHotkeyOverrides } from '@/lib/hotkey
 import { isTypingTarget } from '@/lib/hooks';
 import { getPref, setPref } from '@/lib/prefs';
 import { readThemePreference } from '@/theme-boot';
+import { stripBase } from '@/app/routes';
+import { aiContextFromPath } from '../assistant/context';
 import { useCreateNote } from '../notes/use-create-note';
 import { dailyNote } from '../notes/templates';
 import { openTemplatePicker } from '../notes/template-picker';
@@ -118,6 +121,7 @@ function useAppCommands(ui: UiActions): Command[] {
       { id: 'ui.right.outline', label: 'Painel direito: sumário da nota', group: view, icon: <PanelRight />, available: wide, run: () => ui.toggleRightPanel('outline') },
       { id: 'ui.right.graph', label: 'Painel direito: grafo local', group: view, icon: <PanelRight />, available: wide, run: () => ui.toggleRightPanel('graph') },
       { id: 'ui.right.tags', label: 'Painel direito: tags', group: view, icon: <PanelRight />, available: wide, run: () => ui.toggleRightPanel('tags') },
+      { id: 'ui.right.assistant', label: 'Painel direito: assistente de IA', group: view, icon: <PanelRight />, available: wide, run: () => ui.toggleRightPanel('assistant') },
       {
         id: 'ui.theme',
         label: 'Alternar tema claro/escuro',
@@ -138,6 +142,19 @@ function useAppCommands(ui: UiActions): Command[] {
       { id: 'go.notes', label: 'Ir para Notas', group: nav, icon: <StickyNote />, run: go('/notes') },
       { id: 'go.library', label: 'Ir para Biblioteca (livros e documentos)', group: nav, icon: <LibraryBig />, run: go('/library') },
       { id: 'go.graph', label: 'Ir para Grafo', group: nav, icon: <Waypoints />, run: go('/graph') },
+      {
+        id: 'ai.ask',
+        label: 'Perguntar ao assistente de IA (sobre a página aberta)',
+        group: nav,
+        icon: <Sparkles />,
+        hotkey: 'Alt+I',
+        // Wide screens: the right panel follows the active tab. Phone: the page, with the item as context.
+        run: () => {
+          if (wide) return ui.toggleRightPanel('assistant');
+          const context = aiContextFromPath(stripBase(window.location.pathname) + window.location.search);
+          void navigate(context ? `/assistant?about=${context.type}:${context.id}` : '/assistant');
+        },
+      },
       { id: 'go.maps', label: 'Ir para Mapas livres', group: nav, icon: <Network />, run: go('/maps') },
       { id: 'go.plans', label: 'Ir para Planos de leitura', group: nav, icon: <ListTodo />, run: go('/plans') },
       { id: 'go.study', label: 'Ir para Diário de estudos', group: nav, icon: <CalendarDays />, run: go('/study') },

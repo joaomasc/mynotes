@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
-import { ChevronRight, Hash, Link2, ListTree, MessageSquareQuote, Waypoints, X, type LucideProps } from 'lucide-react';
+import { ChevronRight, Hash, Link2, ListTree, MessageSquareQuote, Sparkles, Waypoints, X, type LucideProps } from 'lucide-react';
 import { analyzeDoc, type InternalLinkType, type Note } from '@mynotes/shared';
 import { Button, IconButton } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/feedback';
@@ -11,6 +11,7 @@ import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
 import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
+import { aiContextFromPath } from '../assistant/context';
 import { LocalGraph } from '../graph/local-graph';
 import { findUnlinkedMentions, linkMention } from '../notes/mentions';
 import { BacklinkList } from '../notes/backlink-list';
@@ -19,11 +20,14 @@ import { workspace } from './store';
 import { pathTarget, usePathTitle } from './tab-info';
 import { useWorkspace } from './workspace';
 
+const AssistantChat = lazy(() => import('../assistant/assistant-chat').then((m) => ({ default: m.AssistantChat })));
+
 export const RIGHT_TABS: { id: string; label: string; icon: ComponentType<LucideProps> }[] = [
   { id: 'backlinks', label: 'Menções', icon: MessageSquareQuote },
   { id: 'outline', label: 'Sumário', icon: ListTree },
   { id: 'graph', label: 'Grafo local', icon: Waypoints },
   { id: 'tags', label: 'Tags', icon: Hash },
+  { id: 'assistant', label: 'Assistente de IA', icon: Sparkles },
 ];
 
 /** Linked panels on the right (like Obsidian's right sidebar): they follow the active tab. */
@@ -32,8 +36,9 @@ export function RightPanel({ tab, onTab, onClose }: { tab: string; onTab: (t: st
   const active = workspace.activeTab();
   const { title } = usePathTitle(active.path, active.title);
   const target = pathTarget(active.path).entity;
+  const assistant = tab === 'assistant';
   return (
-    <aside className="flex h-dvh w-80 shrink-0 flex-col border-l border-border bg-surface-2/40" aria-label="Painel direito">
+    <aside className={cn('flex h-dvh shrink-0 flex-col border-l border-border bg-surface-2/40', assistant ? 'w-[26rem] max-w-[40vw]' : 'w-80')} aria-label="Painel direito">
       <div className="flex h-9 shrink-0 items-center border-b border-border px-1">
         <div role="tablist" aria-label="Painéis" className="flex flex-1">
           {RIGHT_TABS.map((t) => (
@@ -55,6 +60,16 @@ export function RightPanel({ tab, onTab, onClose }: { tab: string; onTab: (t: st
           <X className="size-4" />
         </IconButton>
       </div>
+      {assistant ? (
+        <Suspense fallback={<Hint text="Carregando…" />}>
+          <AssistantChat
+            context={aiContextFromPath(active.path)}
+            contextTitle={title !== '…' ? title : undefined}
+            className="min-h-0 flex-1 bg-surface"
+          />
+        </Suspense>
+      ) : (
+      <>
       <p className="truncate border-b border-border px-3 py-1.5 text-xs text-muted" title={title}>
         {RIGHT_TABS.find((t) => t.id === tab)?.label} · <span className="text-text">{title}</span>
       </p>
@@ -79,6 +94,8 @@ export function RightPanel({ tab, onTab, onClose }: { tab: string; onTab: (t: st
           <TagsPanel noteId={target?.type === 'note' ? target.id : null} />
         )}
       </div>
+      </>
+      )}
     </aside>
   );
 }

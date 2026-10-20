@@ -58,3 +58,77 @@ export function samplePdf(pages: string[][], paddingBytes = 0): Buffer {
   out += `trailer\n<< /Size ${objs.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(out, 'latin1');
 }
+
+/**
+ * Answers the assistant's API calls in the browser (no OpenAI call, no cost).
+ * The chat turn proposes one topic tree; confirming it "executes" it.
+ * Returns the chat request bodies, for assertions.
+ */
+export async function mockAssistant(page: Page, answer: string): Promise<Record<string, unknown>[]> {
+  const bodies: Record<string, unknown>[] = [];
+  const now = new Date().toISOString();
+  const conversationId = '01900000-0000-7000-8000-00000000c0c0';
+  const action = {
+    id: '01900000-0000-7000-8000-0000000000a1',
+    conversationId,
+    tool: 'create_topics',
+    kind: 'write',
+    status: 'proposed',
+    title: 'Criar 3 assunto(s)',
+    preview: [
+      { depth: 0, label: 'Economia Clássica', state: 'new', detail: null },
+      { depth: 1, label: 'Adam Smith', state: 'new', detail: null },
+      { depth: 1, label: 'David Ricardo', state: 'new', detail: null },
+    ],
+    results: [],
+    error: null,
+    createdAt: now,
+    decidedAt: null,
+    expiresAt: now,
+  };
+  await page.route('**/api/v1/ai/**', async (route) => {
+    const url = new URL(route.request().url());
+    const json = (data: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+    if (url.pathname.endsWith('/ai/status')) {
+      return json({
+        enabled: true,
+        configured: true,
+        model: 'gpt-6-luna',
+        dailyBudgetUsd: 0.5,
+        spentTodayUsd: 0,
+        limits: { messageChars: 4000, toolCallsPerTurn: 8, requestsPerMinute: 6 },
+        pricing: { inputPerMTok: 0.1, cachedInputPerMTok: 0.01, outputPerMTok: 0.5 },
+        usage: [],
+      });
+    }
+    if (url.pathname.endsWith('/ai/conversations')) return json([]);
+    if (url.pathname.endsWith('/ai/chat')) {
+      const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+      bodies.push(body);
+      return json({
+        conversation: { id: conversationId, title: String(body.message), contextType: null, contextId: null, messageCount: 2, costUsd: 0.0004, createdAt: now, updatedAt: now },
+        userMessage: { id: body.messageId, conversationId, role: 'user', content: body.message, sources: [], tools: [], actionIds: [], status: 'ok', usage: null, createdAt: now },
+        assistantMessage: {
+          id: '01900000-0000-7000-8000-0000000000b1',
+          conversationId,
+          role: 'assistant',
+          content: answer,
+          sources: [],
+          tools: [{ tool: 'get_topic_tree', label: 'Consultou a árvore de assuntos', kind: 'read', ok: true }],
+          actionIds: [action.id],
+          status: 'ok',
+          usage: { inputTokens: 1000, cachedTokens: 0, outputTokens: 40, reasoningTokens: 0, costUsd: 0.00012 },
+          createdAt: now,
+        },
+        actions: [action],
+        replayed: false,
+      });
+    }
+    if (url.pathname.endsWith(`/ai/actions/${action.id}/confirm`)) {
+      return json({ action: { ...action, status: 'executed', decidedAt: now }, event: null });
+    }
+    if (url.pathname.includes('/ai/conversations/')) return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":{"code":"not_found","message":"Conversa não encontrada"}}' });
+    return route.continue();
+  });
+  return bodies;
+}

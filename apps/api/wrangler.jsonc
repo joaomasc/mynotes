@@ -38,7 +38,26 @@
     // Local development overrides this in .dev.vars.
     "ALLOWED_ORIGINS": "https://mynotes-web.joaomasc-dev.workers.dev,https://joaomasc.github.io",
     "SESSION_MAX_DAYS": "60",
-    "SESSION_IDLE_DAYS": "14"
+    "SESSION_IDLE_DAYS": "14",
+    // AI assistant (OpenAI Responses API). "false" turns it off without a redeploy of code.
+    "AI_ENABLED": "true",
+    // Any Responses-capable model with function calling; changing it needs no code change.
+    "OPENAI_MODEL": "gpt-6-luna",
+    // none | low | medium | high — lower is cheaper (reasoning tokens are billed as output).
+    "AI_REASONING_EFFORT": "low",
+    "AI_MAX_OUTPUT_TOKENS": "2000",
+    // Tool calls the model may make in one chat turn.
+    "AI_MAX_TOOL_CALLS": "8",
+    "AI_MAX_REQUESTS_PER_MINUTE": "6",
+    // Requests are refused once today's recorded spend (UTC) reaches this amount.
+    "AI_DAILY_BUDGET_USD": "0.50",
+    // USD per 1M tokens of OPENAI_MODEL, used to turn the usage reported by the API into cost.
+    // Source: developers.openai.com/api/docs/pricing (gpt-6-luna, Standard, checked 2026-10-20).
+    // Update together with OPENAI_MODEL.
+    "AI_PRICE_INPUT_PER_MTOK": "0.10",
+    "AI_PRICE_CACHED_INPUT_PER_MTOK": "0.01",
+    "AI_PRICE_OUTPUT_PER_MTOK": "0.50"
   }
-  // Secrets (never commit): AUTH_SECRET — set with `wrangler secret put AUTH_SECRET`.
+  // Secrets (never commit): AUTH_SECRET — set with `wrangler secret put AUTH_SECRET`;
+  // OPENAI_API_KEY — set with `wrangler secret put OPENAI_API_KEY` (locally: apps/api/.dev.vars).
 }

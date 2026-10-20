@@ -19,6 +19,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   StickyNote,
   Trash,
   Upload,
@@ -59,6 +60,7 @@ const NAV = [
   { to: '/notes', label: 'Notas', icon: StickyNote, also: [] },
   { to: '/library', label: 'Biblioteca', icon: LibraryBig, also: ['/readings'] },
   { to: '/graph', label: 'Grafo', icon: Waypoints, also: [] },
+  { to: '/assistant', label: 'Assistente', icon: Sparkles, also: [] },
 ];
 
 const MORE: { to: string; label: string; icon: typeof House }[] = [

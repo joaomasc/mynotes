@@ -329,7 +329,8 @@ export interface UpdateNoteInput {
 
 /**
  * Saves a note with optimistic concurrency. A snapshot of the previous state
- * is kept as a revision at most every NOTE_REVISION_INTERVAL_SECONDS.
+ * is kept as a revision at most every NOTE_REVISION_INTERVAL_SECONDS
+ * (always, with `forceRevision`: edits made by the assistant can be undone).
  * Returns the summary (the client already holds the content it sent).
  */
 export async function updateNote(
@@ -337,6 +338,7 @@ export async function updateNote(
   userId: string,
   id: string,
   input: UpdateNoteInput,
+  opts: { forceRevision?: boolean } = {},
 ): Promise<NoteSummary> {
   const current = await getNoteRow(db, userId, id);
   if (!current) throw notFound('Nota');
@@ -386,12 +388,13 @@ export async function updateNote(
          SELECT ?, id, version, title, content, word_count, ? FROM notes
           WHERE id = ? AND user_id = ? AND version = ? AND deleted_at IS NULL
             AND (word_count > 0 OR title <> '')
-            AND NOT EXISTS (SELECT 1 FROM note_revisions WHERE note_id = ? AND created_at > ?)`,
+            AND (? = 1 OR NOT EXISTS (SELECT 1 FROM note_revisions WHERE note_id = ? AND created_at > ?))`,
         uuidv7(),
         now,
         id,
         userId,
         input.baseVersion,
+        opts.forceRevision ? 1 : 0,
         id,
         isoBefore(NOTE_REVISION_INTERVAL_SECONDS),
       ),

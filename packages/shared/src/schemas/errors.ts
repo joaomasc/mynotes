@@ -14,6 +14,8 @@ export const API_ERROR_CODES = [
   'rate_limited',
   'idempotency_conflict',
   'internal_error',
+  /** A dependency (e.g. the AI provider) is not configured or not reachable. */
+  'service_unavailable',
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 

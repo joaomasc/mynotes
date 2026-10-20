@@ -70,13 +70,24 @@ Se você colocar frontend e API sob o **mesmo domínio registrado** (ex.: `notas
 | Segredo | Onde fica |
 |---|---|
 | `AUTH_SECRET` | `wrangler secret put` (produção) e `apps/api/.dev.vars` (local, ignorado pelo git) |
+| `OPENAI_API_KEY` | `wrangler secret put OPENAI_API_KEY` (produção) e `apps/api/.dev.vars` (local). Lida só pelo Worker; nunca é registrada em log, devolvida em resposta (`/ai/status` diz apenas se existe) ou enviada ao navegador. Os testes usam chaves falsas. |
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Secrets do GitHub Actions (só para o deploy manual) |
 
 Não há outros. `VITE_API_URL` e `BASE_PATH` são **públicos** por natureza.
 
+## Assistente de IA
+
+Detalhes em [ai.md](ai.md). Em resumo:
+
+- O modelo não acessa o banco: pede uma de 17 ferramentas de uma lista fixa; cada chamada é revalidada com Zod e executada com o `user_id` da sessão em todas as consultas. Não há SQL livre, acesso genérico ao R2, HTTP arbitrário nem ferramenta de exclusão.
+- O conteúdo de notas, livros e documentos é tratado como **dado não confiável** (possível injeção de instruções). As instruções do sistema vão separadas da conversa e as defesas não dependem do modelo obedecer: escritas só acontecem se a mensagem do usuário pedir uma alteração; lotes, reescritas e mudanças de hierarquia exigem clique em “Confirmar”, e a confirmação revalida tudo antes de gravar.
+- Respostas: links para ids que não existem ou não pertencem ao usuário são removidos; o frontend nunca renderiza HTML do modelo (Markdown vira elementos React, sem imagens).
+- Custos e abuso: limite de mensagens por minuto, de ferramentas e de consultas D1 por mensagem, tamanho máximo de mensagem, histórico limitado, orçamento diário em US$ calculado com o uso real informado pela API, e deduplicação por `messageId` (uma repetição nunca chama o modelo duas vezes).
+- Privacidade: requisições à OpenAI com `store: false`; logs só com contagens de tokens, custo e tempo.
+
 ## Recomendações operacionais
 
-- Ative 2FA na Cloudflare e no GitHub.
+- Ative 2FA na Cloudflare, no GitHub e na OpenAI; use uma chave da OpenAI de projeto, com expiração e limite de gastos na conta.
 - Restrinja o token da Cloudflare às permissões listadas em `docs/deploy.md`.
 - Configure uma regra de rate limiting do WAF para `/api/v1/*` (ex.: 300 requisições/min por IP).
 - Exporte backups periodicamente e guarde-os cifrados fora da Cloudflare.

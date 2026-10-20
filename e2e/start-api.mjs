@@ -52,6 +52,10 @@ const child = spawn(
     'ALLOWED_ORIGINS:http://localhost:5174',
     '--var',
     'AUTH_SECRET:e2e-only-secret-0123456789abcdefghijklmnopqrstuvwxyz',
+    // Overrides a real key in .dev.vars: E2E tests never pay for OpenAI calls (the
+    // assistant's requests are answered by the browser test itself).
+    '--var',
+    'OPENAI_API_KEY:sk-e2e-fake-key-never-valid',
   ],
   { cwd: apiDir, stdio: 'inherit' },
 );

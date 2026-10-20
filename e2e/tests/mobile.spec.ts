@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { login } from './helpers';
+import { login, mockAssistant } from './helpers';
 
 test('mobile layout: bottom navigation, drawer with topics and no horizontal scroll', async ({ page }) => {
   await login(page);
@@ -44,4 +44,20 @@ test('mobile layout: library, book, topic and search pages fit the screen', asyn
   await page.getByRole('button', { name: 'Criar' }).click();
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Assunto no celular');
   await noHorizontalScroll();
+});
+
+test('mobile layout: the assistant page fits the screen and keeps the input above the bottom navigation', async ({ page }) => {
+  await login(page);
+  await mockAssistant(page, 'Resposta curta do assistente.');
+  await page.goto('/assistant');
+  const input = page.getByLabel('Mensagem para o assistente');
+  await expect(input).toBeVisible();
+  await input.fill('Mostre meus assuntos');
+  await page.getByRole('button', { name: 'Enviar' }).click();
+  await expect(page.getByText('Resposta curta do assistente.')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Ação: Criar 3 assunto(s)' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+  const box = await input.boundingBox();
+  const nav = await page.getByRole('navigation', { name: 'Navegação rápida' }).boundingBox();
+  expect(box && nav && box.y + box.height <= nav.y + 1).toBe(true);
 });
