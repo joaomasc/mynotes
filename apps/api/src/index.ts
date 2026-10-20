@@ -3,6 +3,8 @@ import { routeModules } from './modules';
 import { runMaintenance } from './maintenance';
 import { syncAllUsers } from './modules/assistant/knowledge-index';
 
+export { AssistantTools } from './modules/assistant/entrypoint';
+
 const app = createApp(routeModules);
 
 export default {

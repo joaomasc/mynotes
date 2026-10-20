@@ -272,7 +272,6 @@ export const searchKnowledge = defineTool({
     limit: S.nint('Max results, 1–20 (default 10).'),
   }),
   args: zSearch,
-  dbCost: 8,
   label: (a) => `Pesquisou ${q(a.query)}`,
   async run(ctx, a) {
     const limit = a.limit ?? 10;
@@ -336,7 +335,6 @@ export const getNote = defineTool({
     'Reads one note in full: text (plain), topic, book and page (for annotations), #tags, references it makes, and `version` (needed by update_note).',
   parameters: S.obj({ note_id: S.str('Note id (uuid).') }),
   args: zGetNote,
-  dbCost: 6,
   label: () => 'Leu uma nota',
   async run(ctx, a) {
     const [rowRes, tagsRes, linksRes] = await ctx.db.batch<Row>([
@@ -415,7 +413,6 @@ export const getTopic = defineTool({
     'Reads one topic (assunto/subassunto): description, path from the root, subtopics with counts, its notes (titles and excerpts), books, documents, tags and `version` (needed by update_topic and move_topic).',
   parameters: S.obj({ topic_id: S.str('Topic id (uuid).') }),
   args: zGetTopic,
-  dbCost: 8,
   label: () => 'Abriu um assunto',
   async run(ctx, a) {
     const u = ctx.userId;
@@ -538,7 +535,6 @@ export const getTopicTree = defineTool({
     max_depth: S.nint('Levels below the root to show, 1–6 (default 3).'),
   }),
   args: zTree,
-  dbCost: 1,
   label: (a) => (a.root_topic_id ? 'Consultou a árvore de um assunto' : 'Consultou a árvore de assuntos'),
   async run(ctx, a) {
     const rows = (
@@ -592,7 +588,6 @@ export const listTags = defineTool({
   description: 'Lists the #tags already used in notes (most used first), optionally containing a text. Tags are written inline in note text as #name.',
   parameters: S.obj({ query: S.nstr('Only tags containing this text (null = all).') }),
   args: zTags,
-  dbCost: 1,
   label: () => 'Consultou as tags',
   async run(ctx, a) {
     const term = a.query ? normalizeTag(a.query) : '';
@@ -631,7 +626,6 @@ export const searchLibrary = defineTool({
     kind: S.nenum(['all', 'books', 'documents'], 'Default all.'),
   }),
   args: zLibrary,
-  dbCost: 3,
   label: (a) => (a.query ? `Procurou na biblioteca ${q(a.query)}` : 'Consultou a biblioteca'),
   async run(ctx, a) {
     const terms = a.query ? assistantTerms(a.query) : [];
@@ -733,7 +727,6 @@ export const getReading = defineTool({
     page: S.nint('Only annotations of this page (null = all).'),
   }),
   args: zReading,
-  dbCost: 3,
   label: () => 'Abriu um livro',
   async run(ctx, a) {
     const u = ctx.userId;

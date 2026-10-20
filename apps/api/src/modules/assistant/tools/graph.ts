@@ -46,7 +46,6 @@ export const getConnections = defineTool({
     id: S.str('Item id (uuid).'),
   }),
   args: zConnections,
-  dbCost: 8,
   label: () => 'Consultou as conexões de um item',
   async run(ctx, a) {
     const u = ctx.userId;
@@ -182,7 +181,6 @@ export const findConnectionPath = defineTool({
     max_depth: S.nint('Max number of steps, 1–6 (default 4).'),
   }),
   args: zPath,
-  dbCost: 8,
   label: () => 'Procurou um caminho no grafo',
   async run(ctx, a) {
     const graph = await buildGraph(ctx.db, ctx.userId, { structure: 'true' });
@@ -275,7 +273,6 @@ export const getMindMapTool = defineTool({
     map_id: S.nstr('Free mind map id.'),
   }),
   args: zMindMap,
-  dbCost: 9,
   label: (a) => (a.map_id ? 'Leu um mapa mental' : a.topic_id ? 'Leu o mapa mental de um assunto' : 'Listou os mapas mentais'),
   async run(ctx, a) {
     if (a.map_id) {

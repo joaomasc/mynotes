@@ -80,43 +80,6 @@ export interface ToolContext {
    * write tools only register proposals, whatever the model asked.
    */
   writeIntent: boolean;
-  /** D1 statements run by tools in this request (`db` counts them) and how many they may use. */
-  dbBudget: { used: number; limit: number };
-}
-
-/**
- * Wraps D1 to count the statements tools run — a batch counts each of its
- * statements — so a turn stays under the per-request query limit (50 on
- * Workers Free). The statements stay real D1 objects (batch() needs them).
- */
-export function meteredDb(db: D1Database, meter: { used: number }): D1Database {
-  const patch = (s: D1PreparedStatement): D1PreparedStatement => {
-    const bind = s.bind.bind(s);
-    const first = s.first.bind(s) as (...args: unknown[]) => Promise<unknown>;
-    const all = s.all.bind(s);
-    const run = s.run.bind(s);
-    const raw = s.raw.bind(s) as (...args: unknown[]) => Promise<unknown>;
-    return Object.assign(s, {
-      bind: (...values: unknown[]) => patch(bind(...values)),
-      first: (...args: unknown[]) => (meter.used++, first(...args)),
-      all: () => (meter.used++, all()),
-      run: () => (meter.used++, run()),
-      raw: (...args: unknown[]) => (meter.used++, raw(...args)),
-    }) as D1PreparedStatement;
-  };
-  return {
-    prepare: (sql: string) => patch(db.prepare(sql)),
-    batch: (statements: D1PreparedStatement[]) => {
-      meter.used += statements.length;
-      return db.batch(statements);
-    },
-    exec: (sql: string) => {
-      meter.used++;
-      return db.exec(sql);
-    },
-    withSession: (...args: Parameters<D1Database['withSession']>) => db.withSession(...args),
-    dump: () => db.dump(),
-  } as unknown as D1Database;
 }
 
 /** Result returned to the model (serialized as JSON). */
@@ -128,8 +91,6 @@ export interface ToolDef<A = unknown> {
   description: string;
   parameters: Json;
   args: z.ZodType<A>;
-  /** D1 statements one call usually needs at most: a call starts only if the budget still has them. */
-  dbCost: number;
   /** Short Portuguese description of the call for the activity list. */
   label: (args: A) => string;
   run: (ctx: ToolContext, args: A) => Promise<ToolOutput>;

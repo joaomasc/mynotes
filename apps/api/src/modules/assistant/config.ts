@@ -18,7 +18,10 @@ export interface AiConfig {
   model: string;
   reasoningEffort: ReasoningEffort | null;
   maxOutputTokens: number;
-  /** Tool calls the model may make in one chat turn. */
+  /**
+   * Tool calls the model may make in one chat turn. Each runs in its own
+   * Worker invocation; a request may have at most 32 (see MAX_TOOL_CALLS).
+   */
   maxToolCalls: number;
   requestsPerMinute: number;
   /** null = no application budget ("none"). */
@@ -49,6 +52,8 @@ type AiEnv = Partial<
 
 const DEFAULT_MODEL = 'gpt-6-luna';
 const DEFAULT_BUDGET_USD = 0.5;
+/** Default and ceiling of AI_MAX_TOOL_CALLS: 30 tool invocations + the chat request stay under the 32 per request. */
+const MAX_TOOL_CALLS = 30;
 
 function intIn(value: string | undefined, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(value ?? '', 10);
@@ -78,7 +83,7 @@ export function aiConfig(env: Env): AiConfig {
     model: e.OPENAI_MODEL?.trim() || DEFAULT_MODEL,
     reasoningEffort: (REASONING_EFFORTS as readonly string[]).includes(effort ?? '') ? (effort as ReasoningEffort) : null,
     maxOutputTokens: intIn(e.AI_MAX_OUTPUT_TOKENS, 2000, 256, 16_000),
-    maxToolCalls: intIn(e.AI_MAX_TOOL_CALLS, 8, 0, 12),
+    maxToolCalls: intIn(e.AI_MAX_TOOL_CALLS, MAX_TOOL_CALLS, 0, MAX_TOOL_CALLS),
     requestsPerMinute: intIn(e.AI_MAX_REQUESTS_PER_MINUTE, 6, 1, 60),
     dailyBudgetUsd: budgetRaw === 'none' ? null : (nonNegative(budgetRaw) ?? DEFAULT_BUDGET_USD),
     prices:
