@@ -22,6 +22,7 @@ import { ApiError, errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
 import { EntityIcon } from '@/lib/entities';
+import { todayIso } from '@/lib/format';
 import { usePref } from '@/lib/prefs';
 import { qk } from '@/lib/query';
 import { ActionCard } from './action-card';
@@ -109,7 +110,7 @@ export function AssistantChat({
     mutationFn: (p: Pending) => {
       setLive(EMPTY_LIVE);
       return endpoints.ai.chatStream(
-        { conversationId: p.conversationId, messageId: p.messageId, message: p.text, context: p.context, webSearch: p.webSearch },
+        { conversationId: p.conversationId, messageId: p.messageId, message: p.text, context: p.context, webSearch: p.webSearch, localDate: todayIso() },
         (event, data) =>
           setLive((l) => {
             if (event === 'delta') return { ...l, text: l.text + (data as { text: string }).text };

@@ -15,9 +15,9 @@ import {
 } from '../actions';
 import { defineTool, q, S, type ToolContext, type ToolOutput } from './types';
 
-const MODES = ['execute', 'propose'] as const;
-const zMode = z.enum(MODES);
-const modeParam = S.enum(
+export const MODES = ['execute', 'propose'] as const;
+export const zMode = z.enum(MODES);
+export const modeParam = S.enum(
   MODES,
   'execute: apply now — ONLY when the user\'s latest message explicitly asks for this change. propose: register a proposal the user confirms in the app (use for suggestions).',
 );
@@ -27,7 +27,7 @@ const modeParam = S.enum(
  * single reversible write, the model asked to execute and the user's message
  * asks for a change; batches, overwrites and moves always wait for the user.
  */
-async function apply(ctx: ToolContext, plan: Plan, mode: 'execute' | 'propose'): Promise<ToolOutput> {
+export async function apply(ctx: ToolContext, plan: Plan, mode: 'execute' | 'propose'): Promise<ToolOutput> {
   if (plan.noop) return { status: 'nothing_to_do', message: plan.noop, preview: plan.preview.map((l) => l.label) };
   const reason =
     plan.kind === 'sensitive'

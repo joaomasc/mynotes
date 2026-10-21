@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import {
   ANNOTATION_TYPE_LABELS,
+  EMPTY_DOC,
   MATERIAL_TYPE_LABELS,
   NOTE_ROLE_LABELS,
   READING_STATUS_LABELS,
+  docToMarkdown,
   normalizeTag,
   searchTerms,
   zId,
@@ -11,9 +13,10 @@ import {
   type MaterialType,
   type NoteRole,
   type ReadingStatus,
+  type RichTextDoc,
   type SearchEntityType,
 } from '@mynotes/shared';
-import { num, numOrNull, str, strOrNull, stmt, type Bindable, type Row } from '../../../lib/db';
+import { num, numOrNull, parseJson, str, strOrNull, stmt, type Bindable, type Row } from '../../../lib/db';
 import { entityKey, resolveEntities, type EntityRef } from '../../../lib/entities';
 import { chunksOf, indexTextOf, semanticSearch, type IndexedType, type SemanticHit } from '../knowledge-index';
 import { defineTool, linkOf, q, S, truncate, type ToolContext } from './types';
@@ -332,7 +335,7 @@ export const getNote = defineTool({
   name: 'get_note',
   kind: 'read',
   description:
-    'Reads one note in full: text (plain), topic, book and page (for annotations), #tags, references it makes, and `version` (needed by update_note).',
+    'Reads one note in full: its text as Markdown (code blocks keep their language, "/" references are [Título](mynotes:…) links), topic, book and page (for annotations), #tags, references it makes, and `version` (needed by update_note).',
   parameters: S.obj({ note_id: S.str('Note id (uuid).') }),
   args: zGetNote,
   label: () => 'Leu uma nota',
@@ -367,7 +370,7 @@ export const getNote = defineTool({
     const bookTitle = readingId ? (info.get(entityKey('reading', readingId))?.title ?? null) : null;
     const title = str(row.title) || untitled(role, bookTitle, page);
     ctx.sources.add({ type: 'note', id: a.note_id, title, role, readingId, page }, 'read');
-    const body = truncate(str(row.body_text), 8000);
+    const body = truncate(docToMarkdown(parseJson<RichTextDoc>(row.content, structuredClone(EMPTY_DOC))), 8000);
     const references = links.flatMap((l) => {
       const found = info.get(entityKey(l.type, l.id));
       if (!found) return [];
@@ -396,7 +399,7 @@ export const getNote = defineTool({
       version: num(row.version),
       updated: str(row.updated_at),
       word_count: num(row.word_count),
-      text: body.text,
+      content_markdown: body.text,
       text_truncated: body.truncated,
     };
   },

@@ -1,9 +1,10 @@
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { markdownToDoc, uuidv7, zMindMapData } from '@mynotes/shared';
+import { docToMarkdown, markdownToDoc, uuidv7, zMindMapData } from '@mynotes/shared';
 import { aiConfig, costOf, requireReady } from '../src/modules/assistant/config';
 
 import { hasWriteIntent } from '../src/modules/assistant/prompt';
+import { TOOLS } from '../src/modules/assistant/service';
 import { api, client, setupOwner } from './helpers';
 import { answer, callTools, FAKE_KEY, mockOpenAI, parseSse, restoreFetch, searchThenCall, toolOutputs, webAnswer } from './openai-mock';
 import { installSemanticFakes } from './semantic-fakes';
@@ -89,6 +90,59 @@ describe('assistant building blocks', () => {
     expect(hasWriteIntent('O que você sugere para organizar meus assuntos?')).toBe(false);
     expect(hasWriteIntent('Onde anotei a teoria do valor de Ricardo?')).toBe(false);
     expect(hasWriteIntent('Quais notas falam sobre industrialização brasileira?')).toBe(false);
+    expect(hasWriteIntent('Monte um canvas da Revolução Francesa')).toBe(true);
+    expect(hasWriteIntent('Abra a nota diária de hoje')).toBe(true);
+    expect(hasWriteIntent('Esboce um quadro com as causas')).toBe(true);
+  });
+
+  it('declares every tool in a form OpenAI strict mode accepts', () => {
+    // A single invalid schema makes OpenAI refuse the whole request, i.e. every turn.
+    const ALLOWED = new Set(['type', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'description', 'anyOf']);
+    const problems: string[] = [];
+    const check = (schema: any, path: string) => {
+      for (const key of Object.keys(schema)) if (!ALLOWED.has(key)) problems.push(`${path}: palavra-chave não aceita "${key}"`);
+      if (schema.anyOf) return schema.anyOf.forEach((s: any, i: number) => check(s, `${path}.anyOf[${i}]`));
+      const types = [schema.type].flat();
+      if (types.includes('object')) {
+        const keys = Object.keys(schema.properties ?? {});
+        if (schema.additionalProperties !== false) problems.push(`${path}: additionalProperties precisa ser false`);
+        if (JSON.stringify([...(schema.required ?? [])].sort()) !== JSON.stringify([...keys].sort())) problems.push(`${path}: todas as propriedades precisam estar em required`);
+        for (const k of keys) check(schema.properties[k], `${path}.${k}`);
+      }
+      if (types.includes('array')) {
+        if (!schema.items) problems.push(`${path}: array sem items`);
+        else check(schema.items, `${path}[]`);
+      }
+      if (schema.enum && types.includes('null') && !schema.enum.includes(null)) problems.push(`${path}: enum anulável sem null`);
+      if (!schema.anyOf && !schema.type) problems.push(`${path}: sem type`);
+    };
+    for (const tool of TOOLS) {
+      if (tool.parameters.type !== 'object') problems.push(`${tool.name}: a raiz precisa ser um objeto`);
+      check(tool.parameters, tool.name);
+    }
+    expect(problems).toEqual([]);
+    expect(TOOLS.map((t) => t.name)).toEqual(expect.arrayContaining(['get_daily_notes', 'write_daily_note', 'create_canvas', 'update_canvas']));
+    expect(new Set(TOOLS.map((t) => t.name)).size).toBe(TOOLS.length);
+  });
+
+  it('reads documents back as Markdown with code languages and "/" references', () => {
+    const id = uuidv7();
+    const md = [
+      '## Soma',
+      '',
+      `Ver [Ricardo](mynotes:note/${id}) e **isto**.`,
+      '',
+      '```python',
+      'def soma(a, b):',
+      '    return a + b',
+      '```',
+      '',
+      '- [ ] revisar',
+      '- [x] escrever',
+    ].join('\n');
+    const back = docToMarkdown(markdownToDoc(md));
+    expect(back).toBe(md);
+    expect(markdownToDoc('```c#\nvar x = 1;\n```').content[0]!.attrs).toEqual({ language: 'c#' });
   });
 
   it('reads safe defaults and fails clearly without a key or prices', () => {
@@ -276,7 +330,7 @@ describe('assistant: grounded answers', () => {
     const res = await send('Leia essas notas');
     const [ownNote, otherNote] = toolOutputs(bodies[1]);
     expect(ownNote).toMatchObject({ id: mine.id, title: 'Minha nota', version: 1 });
-    expect(ownNote.text).toContain('List');
+    expect(ownNote.content_markdown).toContain('List');
     expect(otherNote).toMatchObject({ error: 'not_found' });
     expect(JSON.stringify(bodies[1])).not.toContain('segredo');
     expect(res.body.data.assistantMessage.content).not.toContain(theirs.id);
@@ -668,6 +722,163 @@ describe('assistant: changes to MyNotes', () => {
 });
 
 /* ------------------------------------------------------------ web search -- */
+
+describe('assistant: daily notes, canvases and code', () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const dayTitle = (day: string) => day.split('-').reverse().join('/');
+
+  it('writes the daily note as the app does (format, topic, template) and reads the week', async () => {
+    const diario = await topic('Diário');
+    const template = await note('Modelo diário', 'Dia {{titulo}}');
+    await http.put('/settings/notes', { value: { dailyTopicId: diario.id, dailyFormat: 'DD/MM/YYYY', dailyTemplateId: template.id } });
+    const { bodies } = mockOpenAI([
+      callTools(['write_daily_note', { date: null, append_markdown: '- estudei **canvas**\n\n```sql\nselect 1;\n```', mode: 'execute' }]),
+      answer('Anotei.'),
+      callTools(['write_daily_note', { date: null, append_markdown: '- revisei', mode: 'execute' }]),
+      answer('Anotei de novo.'),
+      callTools(['get_daily_notes', { from: null, to: null }]),
+      answer('Esta semana…'),
+    ]);
+    await send('Anote no diário de hoje que estudei canvas', { localDate: today });
+    // "Today" is the user's day.
+    expect(bodies[0].instructions).toContain(`Today is ${today}`);
+    const [first] = toolOutputs(bodies[1]);
+    expect(first.status).toBe('executed');
+    expect(first.note).toMatchObject({ title: dayTitle(today), created: true, filed_under_topic: { id: diario.id } });
+
+    await send('Anote também que revisei', { localDate: today });
+    const [second] = toolOutputs(bodies[3]);
+    expect(second.note).toMatchObject({ id: first.note.id, created: false });
+    const saved = (await http.get(`/notes/${first.note.id}`)).body.data;
+    expect(saved.topicId).toBe(diario.id);
+    const md = docToMarkdown(saved.content);
+    // The template (with its variables filled in), then each addition at the end.
+    expect(md).toBe(`Dia ${dayTitle(today)}\n\n- estudei **canvas**\n\n\`\`\`sql\nselect 1;\n\`\`\`\n\n- revisei`);
+
+    await send('O que eu fiz essa semana?', { localDate: today });
+    const [week] = toolOutputs(bodies[5]);
+    expect(week.notes).toEqual([expect.objectContaining({ day: today, id: first.note.id, content_markdown: expect.stringContaining('estudei') })]);
+    expect(week.days_without_note).toHaveLength(6);
+    expect(week.kept_in).toMatchObject({ title_format: 'DD/MM/YYYY', uses_template: true });
+  });
+
+  it('builds a canvas in a topic with real notes, groups, code and arrows, then extends it', async () => {
+    const t = await topic('Revolução Francesa');
+    const n = await note('Bastilha', 'Tomada em 14 de julho', t.id);
+    const { bodies } = mockOpenAI([
+      callTools([
+        'create_canvas',
+        {
+          title: 'Revolução — quadro',
+          topic_id: t.id,
+          note_id: null,
+          cards: [
+            { key: 'g', kind: 'group', title: 'Causas', text_markdown: null, ref_type: null, ref_id: null, url: null, color: 'red', group: null },
+            { key: 'txt', kind: 'text', title: null, text_markdown: `Crise fiscal, ver [Bastilha](mynotes:note/${n.id})\n\n\`\`\`python\nprint(1789)\n\`\`\``, ref_type: null, ref_id: null, url: null, color: null, group: 'g' },
+            { key: 'nota', kind: 'item', title: null, text_markdown: null, ref_type: 'note', ref_id: n.id, url: null, color: null, group: 'g' },
+            { key: 'top', kind: 'item', title: null, text_markdown: null, ref_type: 'topic', ref_id: t.id, url: null, color: null, group: null },
+            { key: 'wiki', kind: 'link', title: 'Wikipédia', text_markdown: null, ref_type: null, ref_id: null, url: 'https://pt.wikipedia.org/wiki/Revolução_Francesa', color: null, group: null },
+          ],
+          arrows: [{ from: 'txt', to: 'nota', label: 'leva a', color: null, arrow: 'end' }],
+          mode: 'execute',
+        },
+      ]),
+      answer('Montei o canvas.'),
+    ]);
+    const res = await send('Monte um canvas da Revolução Francesa neste assunto');
+    const [out] = toolOutputs(bodies[1]);
+    expect(out.status).toBe('executed');
+    expect(res.body.data.actions).toEqual([expect.objectContaining({ tool: 'create_canvas', status: 'executed' })]);
+    const canvas = (await http.get(`/mind-maps/${out.canvas.id}`)).body.data;
+    expect(canvas).toMatchObject({ kind: 'canvas', topicId: t.id });
+    expect(zMindMapData.safeParse(canvas.data).success).toBe(true);
+    const byId = new Map<string, any>(canvas.data.nodes.map((x: any) => [x.id, x]));
+    const card = (key: string) => byId.get(out.card_ids[key])!;
+    const box = (x: any) => ({ x: x.position.x, y: x.position.y, r: x.position.x + x.width, b: x.position.y + x.height });
+    // The group holds its cards; groups come first (drawn below).
+    for (const key of ['txt', 'nota']) {
+      const [c, g] = [box(card(key)), box(card('g'))];
+      expect(c.x >= g.x && c.y >= g.y && c.r <= g.r && c.b <= g.b).toBe(true);
+    }
+    expect(canvas.data.nodes[0].kind).toBe('group');
+    expect(card('g').color).toBe('#b4372f');
+    const text = JSON.stringify(card('txt').doc);
+    expect(text).toContain('"language":"python"');
+    expect(text).toContain(`mynotes:note/${n.id}`);
+    expect(card('nota').ref).toMatchObject({ type: 'note', id: n.id, title: 'Bastilha' });
+    expect(card('wiki')).toMatchObject({ kind: 'link', url: 'https://pt.wikipedia.org/wiki/Revolução_Francesa', label: 'Wikipédia' });
+    expect(canvas.data.edges).toEqual([expect.objectContaining({ source: card('txt').id, target: card('nota').id, label: 'leva a', arrow: 'end' })]);
+    expect(canvas.data.edges[0].sourceHandle).toBeTruthy();
+
+    // Read it back (cards with ids) and extend it: a card into the existing group, an arrow to an old card, a new color.
+    const read = mockOpenAI([callTools(['get_mind_map', { topic_id: null, map_id: canvas.id }]), answer('Li.')]);
+    await send('Leia o canvas');
+    const [described] = toolOutputs(read.bodies[1]);
+    expect(described).toMatchObject({ kind: 'canvas', version: 1 });
+    expect(described.cards.find((c: any) => c.id === card('txt').id)).toMatchObject({ group: card('g').id, text_markdown: expect.stringContaining('```python') });
+    expect(described.arrows[0]).toMatchObject({ from: card('txt').id, label: 'leva a' });
+
+    const upd = mockOpenAI([
+      callTools([
+        'update_canvas',
+        {
+          canvas_id: canvas.id,
+          base_version: 1,
+          title: null,
+          add_cards: [{ key: 'q', kind: 'text', title: null, text_markdown: 'Por que 1789?', ref_type: null, ref_id: null, url: null, color: 'yellow', group: card('g').id }],
+          add_arrows: [{ from: 'q', to: card('top').id, label: null, color: null, arrow: 'both' }],
+          edit_cards: [{ card_id: card('g').id, text_markdown: null, title: 'Causas e contexto', url: null, color: 'none' }],
+          mode: 'execute',
+        },
+      ]),
+      answer('Pronto.'),
+    ]);
+    await send('Acrescente uma pergunta no grupo de causas e ligue ao assunto');
+    const [changed] = toolOutputs(upd.bodies[1]);
+    expect(changed.status).toBe('executed');
+    const after = (await http.get(`/mind-maps/${canvas.id}`)).body.data;
+    expect(after.version).toBe(2);
+    const g2 = after.data.nodes.find((x: any) => x.id === card('g').id);
+    expect(g2).toMatchObject({ label: 'Causas e contexto', color: null });
+    const q = after.data.nodes.find((x: any) => x.id === changed.card_ids.q);
+    // Placed inside the group, which grew to hold it; nothing was removed.
+    const [qb, gb] = [box(q), box(g2)];
+    expect(qb.x >= gb.x && qb.y >= gb.y && qb.r <= gb.r && qb.b <= gb.b).toBe(true);
+    expect(after.data.nodes).toHaveLength(6);
+    expect(after.data.edges).toHaveLength(2);
+
+    // Rewriting what a card says waits for the user; stale versions and unknown cards are refused.
+    const guard = mockOpenAI([
+      callTools(
+        [
+          'update_canvas',
+          { canvas_id: canvas.id, base_version: 2, title: null, add_cards: [], add_arrows: [], edit_cards: [{ card_id: card('txt').id, text_markdown: 'Outro texto', title: null, url: null, color: null }], mode: 'execute' },
+        ],
+        ['update_canvas', { canvas_id: canvas.id, base_version: 1, title: 'X', add_cards: [], add_arrows: [], edit_cards: [], mode: 'execute' }],
+        ['update_canvas', { canvas_id: canvas.id, base_version: 2, title: null, add_cards: [], add_arrows: [{ from: 'nada', to: card('txt').id, label: null, color: null, arrow: 'end' }], edit_cards: [], mode: 'execute' }],
+      ),
+      answer('Confirme.'),
+    ]);
+    await send('Reescreva o cartão de texto');
+    const [rewrite, stale, unknown] = toolOutputs(guard.bodies[1]);
+    expect(rewrite.status).toBe('awaiting_confirmation');
+    expect(stale.error).toBe('version_conflict');
+    expect(unknown.error).toBe('invalid_arguments');
+    expect((await http.get(`/mind-maps/${canvas.id}`)).body.data.version).toBe(2);
+  });
+
+  it('reads notes with their code blocks for the model', async () => {
+    const n = (
+      await http.post('/notes', {
+        title: 'Código',
+        content: { type: 'doc', content: [{ type: 'codeBlock', attrs: { language: 'typescript' }, content: [text('const x: number = 1;\nif (x) {\n  run();\n}')] }] },
+      })
+    ).body.data;
+    const { bodies } = mockOpenAI([callTools(['get_note', { note_id: n.id }]), answer('Li.')]);
+    await send('Leia a nota de código');
+    expect(toolOutputs(bodies[1])[0].content_markdown).toBe('```typescript\nconst x: number = 1;\nif (x) {\n  run();\n}\n```');
+  });
+});
 
 describe('assistant: web search', () => {
   const withVar = async (name: string, value: string, fn: () => Promise<void>) => {

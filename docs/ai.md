@@ -1,6 +1,6 @@
 # Assistente de IA
 
-O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e organiza notas, assuntos, relações e mapas. Ele usa a **OpenAI Responses API** com *function calling*: o modelo só **pede** operações; quem consulta e grava é o Worker, com as mesmas regras e serviços do app. Para encontrar o que você escreveu, combina a busca por palavras com uma **busca por sentido** (vetores no Cloudflare Vectorize, gerados com o `bge-m3` do Workers AI), e a resposta aparece em tempo real. Quando você liga o globo no campo da mensagem, ele também **pesquisa na web** (veja [Pesquisa na web](#pesquisa-na-web)).
+O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e organiza notas (com blocos de código), notas diárias, assuntos, relações, mapas mentais e canvas. Ele usa a **OpenAI Responses API** com *function calling*: o modelo só **pede** operações; quem consulta e grava é o Worker, com as mesmas regras e serviços do app. Para encontrar o que você escreveu, combina a busca por palavras com uma **busca por sentido** (vetores no Cloudflare Vectorize, gerados com o `bge-m3` do Workers AI), e a resposta aparece em tempo real. Quando você liga o globo no campo da mensagem, ele também **pesquisa na web** (veja [Pesquisa na web](#pesquisa-na-web)).
 
 ```
  Navegador                          Worker (Hono)                                 OpenAI
@@ -8,7 +8,7 @@ O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e 
 │ Painel “Assistente” │ /ai/chat  │ auth → limites → histórico → modelo ───────┼────────────►
 │ ou página /assistant│ ────────► │        ▲                         │         │ ◄───────────
 │ (contexto: tipo+id) │           │        │ resultado (JSON)         ▼         │  function_call
-│                     │ ◄──────── │   ferramentas autorizadas (17) → D1       │
+│                     │ ◄──────── │   ferramentas autorizadas (22) → D1       │
 │ cartões: Confirmar  │ /ai/actions│  leitura direta · escrita validada        │
 └─────────────────────┘           │  propostas → ai_actions (confirmação)     │
                                   └──────────────────────────────────────────┘
@@ -22,10 +22,11 @@ O assistente conversa sobre o conteúdo do MyNotes e, quando você pede, cria e 
 
 1. `POST /api/v1/ai/chat/stream` (o app usa este; `POST /ai/chat` é o mesmo turno sem streaming) com `{ messageId, message, conversationId?, context? }`. O `messageId` é gerado pelo navegador: reenviar o mesmo id devolve a resposta já dada (`replayed: true`) sem chamar o modelo de novo.
 2. O Worker autentica, valida o payload (Zod), aplica o limite por minuto e o orçamento diário e confere que o item em contexto existe e é seu. Esses erros saem como HTTP comum, antes do stream.
-3. **Pré-busca:** antes de chamar o modelo, o Worker já roda a busca híbrida com a mensagem inteira e, se uma nota estiver aberta, lê o texto dela. Tudo vai numa mensagem marcada como dado (não instrução), junto com até 12 mensagens anteriores (cortadas em 1.500 caracteres), uma mensagem `developer` com o item aberto (tipo, id e título) e a pergunta. A maioria das perguntas é respondida **numa única chamada ao modelo**.
-4. O modelo pode chamar ferramentas. Cada chamada é revalidada com Zod, executada com `user_id` em todas as consultas e devolvida como JSON. Cada ferramenta roda numa invocação própria do Worker (entrypoint `AssistantTools`, chamada por `exports` de `cloudflare:workers`), com seu próprio limite de consultas D1. No máximo `AI_MAX_TOOL_CALLS` chamadas e 16 rodadas por turno; esgotado o limite, uma última chamada com `tool_choice: "none"` obriga o modelo a responder.
-5. A resposta chega em tempo real (eventos SSE `status`, `tool`, `delta`, `reset`, `done`, `error`) e passa por verificação de citações: links `mynotes:<tipo>/<id>` só ficam se o item existir e for seu; os demais viram texto. As fontes exibidas são os itens citados e os lidos por inteiro.
-6. Mensagens, atividade das ferramentas (só rótulos), fontes, tokens e custo vão para o D1. Resultados brutos de ferramentas **não** são guardados.
+3. **Dia do usuário:** o app envia `localDate` (o dia no fuso do aparelho). O servidor usa esse dia como “hoje” nas instruções e nas notas diárias se ele estiver a até 36 h do relógio do servidor; senão usa o dia de Brasília. O orçamento diário continua contado em UTC.
+4. **Pré-busca:** antes de chamar o modelo, o Worker já roda a busca híbrida com a mensagem inteira e, se uma nota estiver aberta, lê o texto dela (em Markdown). Tudo vai numa mensagem marcada como dado (não instrução), junto com até 12 mensagens anteriores (cortadas em 1.500 caracteres), uma mensagem `developer` com o item aberto (tipo, id e título) e a pergunta. A maioria das perguntas é respondida **numa única chamada ao modelo**.
+5. O modelo pode chamar ferramentas. Cada chamada é revalidada com Zod, executada com `user_id` em todas as consultas e devolvida como JSON. Cada ferramenta roda numa invocação própria do Worker (entrypoint `AssistantTools`, chamada por `exports` de `cloudflare:workers`), com seu próprio limite de consultas D1. No máximo `AI_MAX_TOOL_CALLS` chamadas e 16 rodadas por turno; esgotado o limite, uma última chamada com `tool_choice: "none"` obriga o modelo a responder.
+6. A resposta chega em tempo real (eventos SSE `status`, `tool`, `delta`, `reset`, `done`, `error`) e passa por verificação de citações: links `mynotes:<tipo>/<id>` só ficam se o item existir e for seu; os demais viram texto. As fontes exibidas são os itens citados e os lidos por inteiro.
+7. Mensagens, atividade das ferramentas (só rótulos), fontes, tokens e custo vão para o D1. Resultados brutos de ferramentas **não** são guardados.
 
 ## Ferramentas
 
@@ -34,7 +35,7 @@ Lista explícita em `apps/api/src/modules/assistant/service.ts` (`TOOLS`). Não 
 | Ferramenta | Tipo | O que faz |
 |---|---|---|
 | `search_knowledge` | leitura | Busca híbrida (palavras sem acento + sentido) em notas, resenhas, anotações, assuntos, livros, documentos, conceitos e mapas; cada resultado diz como casou; `#tag` lista notas da tag. |
-| `get_note` | leitura | Texto da nota, assunto, livro/página, tags, referências e `version`. |
+| `get_note` | leitura | Texto da nota **em Markdown** (blocos de código com a linguagem, referências “/” como `[Título](mynotes:…)`), assunto, livro/página, tags, referências e `version`. |
 | `get_topic` | leitura | Assunto com caminho, subassuntos, notas, livros, documentos, tags e `version`. |
 | `get_topic_tree` | leitura | Hierarquia (toda ou de um assunto) com ids — usada antes de criar assuntos. |
 | `list_tags` | leitura | Tags em uso. |
@@ -42,7 +43,8 @@ Lista explícita em `apps/api/src/modules/assistant/service.ts` (`TOOLS`). Não 
 | `get_reading` | leitura | Livro com resenha e anotações por página (páginas e trechos registrados por você). |
 | `get_connections` | leitura | Relações tipadas, quem cita / é citado, hierarquia e anotações de um item. |
 | `find_connection_path` | leitura | Menor caminho entre dois itens no grafo derivado + tags em comum. |
-| `get_mind_map` | leitura | Mapa gerado de um assunto, mapa livre ou lista de mapas. |
+| `get_mind_map` | leitura | Mapa gerado de um assunto, mapa livre, **canvas** (cartões com ids, texto em Markdown, item, link, grupo de cada cartão, setas e `version`) ou lista de mapas e canvas. |
+| `get_daily_notes` | leitura | Notas diárias de um período (até 62 dias; padrão: a última semana), com o começo de cada uma, os dias sem nota e onde elas ficam (assunto, formato do título, modelo). |
 | `create_note` | escrita | Nota (ou anotação de página) em Markdown → documento do editor; links internos viram referências “/”; tags `#`. |
 | `update_note` | escrita | Título, acrescentar texto, mover de assunto; **reescrever tudo exige confirmação**. Sempre com `base_version` e versão salva no histórico antes. |
 | `create_topics` | escrita | Um assunto ou uma árvore inteira; reaproveita equivalentes (mesmo título e pai). **Mais de um assunto novo exige confirmação.** |
@@ -50,6 +52,9 @@ Lista explícita em `apps/api/src/modules/assistant/service.ts` (`TOOLS`). Não 
 | `move_topic` | sensível | Mudar a hierarquia — **sempre** proposta. Impede ciclos. |
 | `create_relations` | escrita | Relações tipadas (`related`, `references`, `depends_on`, `part_of`, `supports`, `contrasts`, `example_of`); recusa duplicatas, autorreferência, ciclos de `depends_on`/`part_of` e `part_of` entre assuntos. **Mais de uma exige confirmação.** |
 | `propose_mind_map` | escrita | Mapa conceitual (novo ou acrescentado a um existente) com nós ligados a itens reais — **sempre** proposta. |
+| `write_daily_note` | escrita | Abre a nota diária de um dia (hoje, ontem, uma data), criando-a como o app faz (formato do título, assunto e modelo de *Configurações › Notas*, com as variáveis preenchidas), e acrescenta Markdown ao fim. Nunca apaga o que já existe. |
+| `create_canvas` | escrita | Canvas num assunto e/ou numa nota: cartões de texto (Markdown com referências “/”, código, tags), notas e assuntos reais como cartões, links da web, grupos que contêm cartões e setas com rótulo, cor e pontas; o layout é automático. |
+| `update_canvas` | escrita | Acrescenta cartões (abaixo do que existe ou dentro de um grupo existente, que cresce), setas entre cartões novos e antigos, muda título de grupos/links, endereço e cor, renomeia. Com `base_version`. **Reescrever o texto de um cartão exige confirmação**; nada é removido. |
 
 ### Política de confirmação
 
@@ -58,7 +63,7 @@ Lista explícita em `apps/api/src/modules/assistant/service.ts` (`TOOLS`). Não 
 | Leitura | Executa direto. |
 | Uma escrita reversível pedida explicitamente (“crie”, “adicione”, “renomeie”…) com `mode: "execute"` | Executa e registra em `ai_actions` (auditoria). |
 | A mensagem é pergunta ou pedido de conselho (“como eu organizaria…?”, “o que você sugere…”) | **Vira proposta**, mesmo que o modelo peça para executar (verificação no servidor, `prompt.ts › hasWriteIntent`). |
-| Lote (vários assuntos/relações), possível duplicata, reescrita de nota, mudança de hierarquia, mapa mental | **Sempre proposta**: o cartão mostra a prévia; nada é gravado até você clicar em **Confirmar**. |
+| Lote (vários assuntos/relações), possível duplicata, reescrita de nota ou do texto de um cartão de canvas, mudança de hierarquia, mapa mental | **Sempre proposta**: o cartão mostra a prévia; nada é gravado até você clicar em **Confirmar**. |
 
 Confirmar (`POST /ai/actions/{id}/confirm`) reserva a proposta de forma atômica (não executa duas vezes), **revalida tudo com os dados atuais** e grava. Propostas valem 24 h. O resultado (feito ou falha) entra na conversa como registro, e o modelo o vê nos turnos seguintes.
 

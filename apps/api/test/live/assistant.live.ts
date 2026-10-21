@@ -90,4 +90,71 @@ describe('assistant against the real OpenAI API', () => {
     console.info(`\nConsumo real desta execução: ${JSON.stringify(usage)}`);
     expect(usage.requests).toBe(4);
   });
+
+  it('writes the daily note, builds and extends a canvas, and writes code', async () => {
+    const owner = await setupOwner();
+    const http = client(owner.token);
+    const today = new Date().toISOString().slice(0, 10);
+    const diario = (await http.post('/topics', { title: 'Diário' })).body.data;
+    await http.put('/settings/notes', { value: { dailyTopicId: diario.id, dailyFormat: 'YYYY-MM-DD' } });
+    const rf = (await http.post('/topics', { title: 'Revolução Francesa' })).body.data;
+    const bastilha = (
+      await http.post('/notes', { title: 'Bastilha', topicId: rf.id, content: doc('A tomada da Bastilha, em 14 de julho de 1789, marcou o início da revolução.') })
+    ).body.data;
+    await http.post('/notes', { title: 'Crise fiscal', topicId: rf.id, content: doc('As dívidas da coroa e os impostos sobre o Terceiro Estado levaram à convocação dos Estados Gerais.') });
+
+    const turn = async (message: string, extra: Record<string, unknown> = {}) => {
+      const res = await http.post('/ai/chat', { messageId: uuidv7(), message, localDate: today, ...extra });
+      if (res.status !== 200) console.error('chat failed', res.status, JSON.stringify(res.body));
+      expect(res.status).toBe(200);
+      const m = res.body.data.assistantMessage;
+      console.info(`\n> ${message}\n${m.content}\n[tools: ${m.tools.map((t: any) => t.label).join(' | ')}]\n[ações: ${res.body.data.actions.map((a: any) => `${a.tool}=${a.status}`).join(', ')}]`);
+      return res.body.data;
+    };
+    const action = (data: any, tool: string) => data.actions.find((a: any) => a.tool === tool);
+
+    // 1. Daily note: created as the app does (title format, topic), with the text.
+    const daily = await turn('Anote na minha nota diária de hoje: estudei a Revolução Francesa por uma hora.');
+    expect(action(daily, 'write_daily_note')?.status).toBe('executed');
+    const dailyNote = (await http.get(`/notes/${action(daily, 'write_daily_note').results[0].id}`)).body.data;
+    expect(dailyNote).toMatchObject({ title: today, topicId: diario.id });
+    expect(JSON.stringify(dailyNote.content)).toMatch(/Revolu/);
+
+    // 2. Canvas in the topic being viewed, with the real notes as cards.
+    const built = await turn('Monte um canvas chamado "Revolução — causas" neste assunto, com as minhas notas como cartões dentro de um grupo "Causas" e setas ligando as ideias.', {
+      context: { type: 'topic', id: rf.id, view: null },
+    });
+    const created = action(built, 'create_canvas');
+    expect(created?.status).toBe('executed');
+    const canvasId = created.results[0].id;
+    const canvas = (await http.get(`/mind-maps/${canvasId}`)).body.data;
+    console.info(`\nCanvas: ${JSON.stringify(canvas.data.nodes.map((n: any) => ({ kind: n.kind, label: n.label, ref: n.ref?.title })))}\nSetas: ${canvas.data.edges.length}`);
+    expect(canvas).toMatchObject({ kind: 'canvas', topicId: rf.id });
+    expect(canvas.data.nodes.some((n: any) => n.kind === 'item' && n.ref?.id === bastilha.id)).toBe(true);
+    expect(canvas.data.nodes.some((n: any) => n.kind === 'group')).toBe(true);
+
+    // 3. Extending the canvas that is open: read it, then a new card connected to an existing one.
+    const extended = await turn('Acrescente neste canvas um cartão de texto com a pergunta "Por que 1789?" ligado ao cartão da nota Bastilha.', {
+      conversationId: built.conversation.id,
+      context: { type: 'mindmap', id: canvasId, view: null },
+    });
+    expect(action(extended, 'update_canvas')?.status).toBe('executed');
+    const after = (await http.get(`/mind-maps/${canvasId}`)).body.data;
+    expect(after.version).toBeGreaterThan(canvas.version);
+    expect(after.data.nodes.length).toBe(canvas.data.nodes.length + 1);
+    expect(JSON.stringify(after.data.nodes)).toContain('1789?');
+    expect(after.data.edges.length).toBeGreaterThan(canvas.data.edges.length);
+
+    // 4. Code: a fenced block with its language becomes a highlighted code block.
+    const code = await turn('Crie uma nota chamada "Soma em Python" com um bloco de código Python de uma função que soma dois números.');
+    expect(action(code, 'create_note')?.status).toBe('executed');
+    const codeNote = (await http.get(`/notes/${action(code, 'create_note').results[0].id}`)).body.data;
+    const block = codeNote.content.content.find((b: any) => b.type === 'codeBlock');
+    console.info(`\nBloco de código: ${JSON.stringify(block)}`);
+    expect(block?.attrs.language).toMatch(/^py(thon)?$/);
+    expect(block.content[0].text).toMatch(/def \w+\(.*\):\n {4}return/);
+
+    const usage = await env.DB.prepare('SELECT * FROM ai_usage_daily WHERE user_id = ? AND day = ?').bind(owner.user.id, today).first<any>();
+    console.info(`\nConsumo real desta execução: ${JSON.stringify(usage)}`);
+  });
 });

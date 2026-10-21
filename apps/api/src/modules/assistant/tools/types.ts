@@ -80,6 +80,8 @@ export interface ToolContext {
    * write tools only register proposals, whatever the model asked.
    */
   writeIntent: boolean;
+  /** The user's calendar day ("2026-10-21"), in their time zone: "hoje" for daily notes. */
+  localToday: string;
 }
 
 /** Result returned to the model (serialized as JSON). */

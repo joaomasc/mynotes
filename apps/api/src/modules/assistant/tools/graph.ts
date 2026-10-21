@@ -4,6 +4,7 @@ import {
   RELATION_KIND_LABELS,
   analyzeDoc,
   zId,
+  zMindMapData,
   type GraphEdge,
   type GraphEntityType,
   type RelationKind,
@@ -13,6 +14,7 @@ import {
 import { num, parseJson, str, strOrNull, stmt, type Row } from '../../../lib/db';
 import { entityKey, resolveEntities, type EntityRef } from '../../../lib/entities';
 import { buildGraph } from '../../overview/service';
+import { describeCanvas } from '../canvas-actions';
 import { defineTool, linkOf, S, truncate } from './types';
 
 const zEntity = z.enum(GRAPH_ENTITY_TYPES);
@@ -268,18 +270,35 @@ export const getMindMapTool = defineTool({
   name: 'get_mind_map',
   kind: 'read',
   description:
-    'Reads a mind map as an outline. topic_id: the map generated from a topic (subtopics as branches, items under their topic, typed relations as cross-links). ' +
-    'map_id: a free mind map (nodes, parent links, extra labelled links, items linked to nodes) with `version`. Both null: lists the free mind maps.',
+    'Reads a mind map or a canvas. topic_id: the map generated from a topic (subtopics as branches, items under their topic, typed relations as cross-links). ' +
+    'map_id: a free mind map (outline of nodes, parent links, labelled links, linked items) or a canvas (its cards with ids — text as Markdown, items, links, groups and which group holds each card — and its arrows), with `version` for propose_mind_map / update_canvas. ' +
+    'Both null: lists the free mind maps and canvases (kind) with the topic or note they belong to.',
   parameters: S.obj({
     topic_id: S.nstr('Topic whose generated map to read.'),
-    map_id: S.nstr('Free mind map id.'),
+    map_id: S.nstr('Free mind map or canvas id.'),
   }),
   args: zMindMap,
-  label: (a) => (a.map_id ? 'Leu um mapa mental' : a.topic_id ? 'Leu o mapa mental de um assunto' : 'Listou os mapas mentais'),
+  label: (a) => (a.map_id ? 'Leu um mapa ou canvas' : a.topic_id ? 'Leu o mapa mental de um assunto' : 'Listou os mapas e canvas'),
   async run(ctx, a) {
     if (a.map_id) {
       const row = await stmt(ctx.db, 'SELECT * FROM mind_maps WHERE id = ? AND user_id = ?', a.map_id, ctx.userId).first<Row>();
       if (!row) return { error: 'not_found', message: 'Mapa mental não encontrado.' };
+      if (str(row.kind) === 'canvas') {
+        ctx.sources.add({ type: 'mindmap', id: a.map_id, title: str(row.title) }, 'read');
+        const parsed = zMindMapData.safeParse(parseJson(row.data, { nodes: [], edges: [] }));
+        const canvas = describeCanvas(parsed.success ? parsed.data : { nodes: [], edges: [], viewport: null }, linkOf);
+        for (const c of canvas.cards) if (c.item) ctx.sources.add({ type: c.item.type, id: c.item.id, title: c.item.title });
+        return {
+          id: a.map_id,
+          link: linkOf('mindmap', a.map_id),
+          kind: 'canvas',
+          title: str(row.title),
+          version: num(row.version),
+          topic_id: strOrNull(row.topic_id),
+          note_id: strOrNull(row.note_id),
+          ...canvas,
+        };
+      }
       const data = parseJson<{
         nodes: { id: string; label: string; parentId: string | null; ref: { type: string; id: string; title?: string } | null; doc?: RichTextNode; url?: string }[];
         edges: { source: string; target: string; label: string }[];
@@ -362,11 +381,11 @@ export const getMindMapTool = defineTool({
       await stmt(ctx.db, 'SELECT id, kind, title, topic_id, note_id, node_count, updated_at FROM mind_maps WHERE user_id = ? ORDER BY updated_at DESC LIMIT 40', ctx.userId).all<Row>()
     ).results;
     return {
-      free_maps: maps.map((m) => {
+      maps: maps.map((m) => {
         ctx.sources.add({ type: 'mindmap', id: str(m.id), title: str(m.title) });
         return { id: str(m.id), kind: str(m.kind), link: linkOf('mindmap', str(m.id)), title: str(m.title), nodes: num(m.node_count), topic_id: strOrNull(m.topic_id), note_id: strOrNull(m.note_id) };
       }),
-      note: 'Cada assunto também tem um mapa gerado (use topic_id).',
+      note: 'kind "canvas" = quadro livre de cartões (update_canvas); "mindmap" = mapa mental. Cada assunto também tem um mapa gerado (use topic_id).',
     };
   },
 });

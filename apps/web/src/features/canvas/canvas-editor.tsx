@@ -184,6 +184,18 @@ export function CanvasEditor({ map }: { map: MindMap }) {
   // Flush when leaving the page.
   useEffect(() => () => void (dirty.current && save()), [save]);
 
+  // Changed elsewhere (the assistant, another device): shown at once when nothing here waits to be saved;
+  // otherwise the next save meets the conflict banner.
+  useEffect(() => {
+    if (map.version <= version.current || dirty.current || statusRef.current === 'saving') return;
+    const f = toCanvasFlow(map.data);
+    setNodes(f.nodes);
+    setEdges(f.edges);
+    setTitle(map.title);
+    setOwner({ topicId: map.topicId, noteId: map.noteId });
+    version.current = map.version;
+  }, [map]);
+
   const onNodesChange = useCallback(
     (changes: NodeChange<CardNode>[]) => {
       setNodes((ns) => applyNodeChanges(changes, ns));

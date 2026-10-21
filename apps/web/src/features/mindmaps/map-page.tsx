@@ -107,6 +107,16 @@ function Editor({ map }: { map: MindMap }) {
   // Flush when leaving the page.
   useEffect(() => () => void (dirty.current && save()), [save]);
 
+  // Changed elsewhere (the assistant, another device): shown at once when nothing here waits to be saved.
+  useEffect(() => {
+    if (map.version <= version.current || dirty.current || statusRef.current === 'saving') return;
+    const f = toFlow(map.data);
+    setNodes(f.nodes);
+    setEdges(f.edges);
+    setTitle(map.title);
+    version.current = map.version;
+  }, [map]);
+
   const onNodesChange = useCallback(
     (changes: NodeChange<MindFlowNode>[]) => {
       setNodes((ns) => applyNodeChanges(changes, ns));

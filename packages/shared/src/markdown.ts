@@ -171,7 +171,7 @@ function parseBlocks(lines: string[], depth: number): RichTextNode[] {
       flushPara();
       continue;
     }
-    const fence = /^(```|~~~)\s*([\w+-]{0,30})\s*$/.exec(trimmed);
+    const fence = /^(```|~~~)\s*([\w+#-]{0,30})\s*$/.exec(trimmed);
     if (fence) {
       flushPara();
       const code: string[] = [];
@@ -240,6 +240,94 @@ function parseBlocks(lines: string[], depth: number): RichTextNode[] {
 export function markdownToDoc(markdown: string): RichTextDoc {
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
   return { type: 'doc', content: parseBlocks(lines, 0) };
+}
+
+/* --------------------------------------------------------- doc → markdown -- */
+
+function inlineMarkdown(nodes: RichTextNode[] | undefined): string {
+  let out = '';
+  for (const node of nodes ?? []) {
+    if (node.type === 'hardBreak') {
+      out += '  \n';
+      continue;
+    }
+    if (node.type === 'reference' || node.type === 'mention' || node.type === 'internalLink') {
+      const href = typeof node.attrs?.href === 'string' ? node.attrs.href : null;
+      const label = typeof node.attrs?.label === 'string' && node.attrs.label ? node.attrs.label : 'referência';
+      out += href ? `[${label}](${href})` : label;
+      continue;
+    }
+    if (typeof node.text !== 'string') {
+      out += inlineMarkdown(node.content);
+      continue;
+    }
+    let text = node.text;
+    const marks = node.marks ?? [];
+    if (marks.some((m) => m.type === 'code')) text = `\`${text}\``;
+    if (marks.some((m) => m.type === 'bold')) text = `**${text}**`;
+    if (marks.some((m) => m.type === 'italic')) text = `*${text}*`;
+    if (marks.some((m) => m.type === 'strike')) text = `~~${text}~~`;
+    const link = marks.find((m) => m.type === 'link');
+    if (typeof link?.attrs?.href === 'string') text = `[${text}](${link.attrs.href})`;
+    out += text;
+  }
+  return out;
+}
+
+function blockMarkdown(node: RichTextNode, depth: number): string {
+  const children = (nodes: RichTextNode[] | undefined) => (nodes ?? []).map((n) => blockMarkdown(n, depth)).filter((s) => s !== '');
+  const list = (ordered: boolean, task: boolean) =>
+    (node.content ?? [])
+      .map((item, i) => {
+        const marker = task ? `- [${item.attrs?.checked ? 'x' : ' '}] ` : ordered ? `${i + 1}. ` : '- ';
+        const [first, ...rest] = (item.content ?? []).map((c) => blockMarkdown(c, depth + 1));
+        const nested = rest.map((r) => r.replace(/^/gm, '  ')).join('\n');
+        return `${marker}${first ?? ''}${nested ? `\n${nested}` : ''}`;
+      })
+      .join('\n');
+  switch (node.type) {
+    case 'paragraph':
+      return inlineMarkdown(node.content);
+    case 'heading':
+      return `${'#'.repeat(Number(node.attrs?.level) || 1)} ${inlineMarkdown(node.content)}`;
+    case 'bulletList':
+      return list(false, false);
+    case 'orderedList':
+      return list(true, false);
+    case 'taskList':
+      return list(false, true);
+    case 'blockquote':
+      return children(node.content)
+        .join('\n\n')
+        .replace(/^/gm, '> ');
+    case 'codeBlock': {
+      const language = typeof node.attrs?.language === 'string' ? node.attrs.language : '';
+      return `\`\`\`${language}\n${(node.content ?? []).map((c) => c.text ?? '').join('')}\n\`\`\``;
+    }
+    case 'horizontalRule':
+      return '---';
+    case 'properties': {
+      const items = Array.isArray(node.attrs?.items) ? (node.attrs.items as { key?: unknown; value?: unknown }[]) : [];
+      return items
+        .filter((p) => typeof p.key === 'string')
+        .map((p) => `${String(p.key)}: ${String(p.value ?? '')}`)
+        .join('  \n');
+    }
+    default:
+      return node.content ? children(node.content).join('\n\n') : inlineMarkdown([node]);
+  }
+}
+
+/**
+ * The editor's document as Markdown — the same subset markdownToDoc reads:
+ * code blocks keep their language and "/" references stay `[Título](mynotes:…)`,
+ * so a text read this way can be edited and written back without losing them.
+ */
+export function docToMarkdown(doc: RichTextNode): string {
+  return (doc.content ?? [])
+    .map((n) => blockMarkdown(n, 0))
+    .filter((s) => s !== '')
+    .join('\n\n');
 }
 
 /** Internal links (`mynotes:` references) written in the Markdown. */

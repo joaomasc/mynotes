@@ -27,6 +27,8 @@ import { createMindMap, getMindMap, updateMindMap } from '../knowledge/service';
 import { createNote, getNoteRow, updateNote } from '../notes/service';
 import { getTopicRow, moveTopic, topicSearchText, updateTopic } from '../topics/service';
 import { markdownToDoc, referencesIn } from '@mynotes/shared';
+import { executeCreateCanvas, executeUpdateCanvas } from './canvas-actions';
+import { executeWriteDailyNote } from './daily-actions';
 
 /**
  * Writes the assistant can request. Each one has a *plan* (validates ids,
@@ -44,6 +46,9 @@ export const ACTION_TOOLS = [
   'move_topic',
   'create_relations',
   'create_mind_map',
+  'write_daily_note',
+  'create_canvas',
+  'update_canvas',
 ] as const;
 export type ActionTool = (typeof ACTION_TOOLS)[number];
 
@@ -80,13 +85,13 @@ export class PlanError extends Error {
 }
 
 const PROPOSAL_TTL_SECONDS = 24 * 3600;
-const line = (depth: number, label: string, state: AiPreviewLine['state'], detail: string | null = null): AiPreviewLine => ({
+export const line = (depth: number, label: string, state: AiPreviewLine['state'], detail: string | null = null): AiPreviewLine => ({
   depth,
   label,
   state,
   detail,
 });
-const source = (type: AiSource['type'], id: string, title: string, extra: Partial<AiSource> = {}): AiSource => ({
+export const source = (type: AiSource['type'], id: string, title: string, extra: Partial<AiSource> = {}): AiSource => ({
   type,
   id,
   title,
@@ -95,10 +100,10 @@ const source = (type: AiSource['type'], id: string, title: string, extra: Partia
   page: null,
   ...extra,
 });
-const quoted = (t: string) => `“${t}”`;
+export const quoted = (t: string) => `“${t}”`;
 const sameTitle = (a: string, b: string) => normalizeSearch(a) === normalizeSearch(b);
 
-async function requireEntities(db: D1Database, userId: string, refs: EntityRef[]): Promise<Map<string, EntityInfo>> {
+export async function requireEntities(db: D1Database, userId: string, refs: EntityRef[]): Promise<Map<string, EntityInfo>> {
   const info = await resolveEntities(db, userId, refs);
   const missing = refs.filter((r) => !info.has(entityKey(r.type, r.id)));
   if (missing.length) {
@@ -132,7 +137,7 @@ function tagText(tags: string[]): string {
 }
 
 /** The note's document: the Markdown, then a "Referências" line with "/" references and the #tags. */
-function noteDoc(markdown: string, references: EntityRef[], tags: string[], info: Map<string, EntityInfo>): RichTextDoc {
+export function noteDoc(markdown: string, references: EntityRef[], tags: string[], info: Map<string, EntityInfo>): RichTextDoc {
   const doc = markdownToDoc(markdown);
   const inline = new Set(referencesIn(doc).map((r) => `${r.type}:${r.id}`));
   // Labels are display snapshots: the app always shows the current title.
@@ -163,9 +168,9 @@ function noteDoc(markdown: string, references: EntityRef[], tags: string[], info
   return doc;
 }
 
-const wordCount = (markdown: string) => markdown.split(/\s+/).filter(Boolean).length;
+export const wordCount = (markdown: string) => markdown.split(/\s+/).filter(Boolean).length;
 
-async function noteRefsInfo(db: D1Database, userId: string, p: CreateNotePayload | { markdown: string; references: EntityRef[] }) {
+export async function noteRefsInfo(db: D1Database, userId: string, p: CreateNotePayload | { markdown: string; references: EntityRef[] }) {
   const inline = referencesIn(markdownToDoc(p.markdown)) as EntityRef[];
   return requireEntities(db, userId, [...inline, ...p.references]);
 }
@@ -860,6 +865,9 @@ const EXECUTORS: Record<ActionTool, (db: D1Database, userId: string, payload: ne
   move_topic: executeMoveTopic,
   create_relations: executeCreateRelations,
   create_mind_map: executeCreateMindMap,
+  write_daily_note: executeWriteDailyNote,
+  create_canvas: executeCreateCanvas,
+  update_canvas: executeUpdateCanvas,
 };
 
 export function execute(db: D1Database, userId: string, plan: Pick<Plan, 'tool' | 'payload'>): Promise<Execution> {

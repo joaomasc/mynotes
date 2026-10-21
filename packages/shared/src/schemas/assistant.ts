@@ -32,6 +32,8 @@ export const zAiChatRequest = z.object({
   context: zAiContext.nullable().default(null),
   /** Lets the model search the web in this turn (opt-in per message: it costs more and leaves MyNotes). */
   webSearch: z.boolean().default(false),
+  /** The user's calendar day (their time zone): "hoje" and daily notes. Ignored when far from the server's clock. */
+  localDate: zDate.nullable().default(null),
 });
 export type AiChatRequest = z.input<typeof zAiChatRequest>;
 
