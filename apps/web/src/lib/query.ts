@@ -94,6 +94,8 @@ export const qk = {
   relationsAll: ['relations'] as const,
   mindMaps: ['mind-maps'] as const,
   mindMap: (id: string) => ['mind-map', id] as const,
+  /** Under mindMaps, so creating or saving any map refreshes these lists. */
+  mindMapList: (filters: object) => ['mind-maps', filters] as const,
   graph: (filters: object) => ['graph', filters] as const,
   dashboard: ['dashboard'] as const,
   favorites: ['favorites'] as const,

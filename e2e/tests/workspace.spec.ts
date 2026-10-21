@@ -17,7 +17,7 @@ test('tabs, split panes and the browser back button (Obsidian-like workspace)', 
   // Split: the same note beside, then another page in the new pane.
   await page.getByRole('button', { name: 'Dividir à direita' }).first().click();
   await expect(panes(page)).toHaveCount(2);
-  await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Notas' }).click();
+  await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Notas', exact: true }).click();
   await expect(panes(page).nth(1)).toContainText('Segunda W');
   await expect(panes(page).nth(0).locator('.ProseMirror')).toContainText('Texto da primeira.');
   // Browser back goes back inside the active tab.
@@ -102,7 +102,7 @@ test('switching tabs keeps each page as it was (nothing is loaded again)', async
   const index = await all.evaluateAll((els) => els.findIndex((e) => e.getAttribute('aria-selected') === 'true'));
 
   // Another note in a new tab (Ctrl+click on "Notas", then the note), then back to the first tab.
-  await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Notas' }).click({ modifiers: ['Control'] });
+  await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Notas', exact: true }).click({ modifiers: ['Control'] });
   await page.getByRole('main').getByRole('link', { name: /Aba B W/ }).first().click();
   await expect(shown).toContainText('Texto da aba B.');
   await all.nth(index).click();

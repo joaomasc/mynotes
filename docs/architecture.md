@@ -53,7 +53,7 @@ Formato das respostas: `{ "data": … }`; listas paginadas `{ "data": [...], "me
 | `readings`, `reading_plans`, `reading_plan_items` | Livros/leituras (com PDF opcional via `document_id` e página atual) e planos com etapas ordenáveis. |
 | `study_sessions`, `study_session_notes`, `study_session_documents` | Diário com referências (chaves estrangeiras reais). |
 | `concepts`, `relations` | Relações tipadas entre assunto, nota, documento, leitura e conceito (generaliza `topic_relations`). |
-| `mind_maps` | Mapa inteiro em JSON validado (nós, conexões, viewport). |
+| `mind_maps` | Mapa mental ou **canvas** (`kind`) inteiro em JSON validado (nós/cartões, conexões, viewport). Um canvas pode pertencer a um assunto (`topic_id`) e/ou a uma nota (`note_id`); cartões de texto guardam rich text com os links saneados como nas notas. |
 | `favorites`, `activity_events`, `settings` | Transversais. |
 | `view_layouts` | Disposição visual de visualizações geradas (posições e ramos recolhidos do mapa mental de um assunto). Nunca é lida para inferir hierarquia ou relações. |
 | `idempotency_keys`, `import_jobs`, `import_chunks`, `import_guard` | Infraestrutura de sincronização e backup. |

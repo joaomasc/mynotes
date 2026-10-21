@@ -26,7 +26,7 @@ export function Component() {
   const [topicId, setTopicId] = useState<string | null>(null);
   const [imported, setImported] = useState<MindMapData | null>(null);
   const file = useRef<HTMLInputElement>(null);
-  const maps = useQuery({ queryKey: qk.mindMaps, queryFn: endpoints.mindMaps.list });
+  const maps = useQuery({ queryKey: qk.mindMapList({ kind: 'mindmap' }), queryFn: () => endpoints.mindMaps.list({ kind: 'mindmap' }) });
 
   useEffect(() => {
     if (params.get('new') === '1') {

@@ -254,6 +254,127 @@
 .prose-note pre code {
   @apply bg-transparent p-0;
 }
+/* Code blocks (code-block.tsx): language picker and copy button above the code. */
+.prose-note .code-block {
+  @apply relative overflow-hidden rounded-lg border border-border bg-surface-2;
+}
+.prose-note .code-block pre {
+  @apply rounded-none bg-transparent pt-1;
+  tab-size: 4;
+}
+.code-block-bar {
+  @apply flex items-center justify-between gap-2 px-2 pt-1.5 select-none;
+}
+.code-block-language {
+  @apply h-6 max-w-44 cursor-pointer rounded bg-transparent px-1.5 font-sans text-xs text-subtle outline-none hover:bg-surface-3 hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/40;
+}
+span.code-block-language {
+  @apply inline-flex cursor-default items-center hover:bg-transparent;
+}
+.code-block-copy {
+  @apply rounded p-1 text-subtle opacity-0 transition-opacity hover:bg-surface-3 hover:text-text focus-visible:opacity-100;
+}
+.code-block:hover .code-block-copy {
+  @apply opacity-100;
+}
+@media (hover: none) {
+  .code-block-copy {
+    @apply opacity-100;
+  }
+}
+
+/* Syntax colors (highlight.js classes from lowlight), GitHub-like in both themes. */
+:root {
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #0550ae;
+  --hl-title: #8250df;
+  --hl-type: #953800;
+  --hl-comment: #6e7781;
+  --hl-tag: #116329;
+  --hl-add-bg: #dafbe1;
+  --hl-del-bg: #ffebe9;
+  --hl-del: #82071e;
+}
+.dark {
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-number: #79c0ff;
+  --hl-title: #d2a8ff;
+  --hl-type: #ffa657;
+  --hl-comment: #8b949e;
+  --hl-tag: #7ee787;
+  --hl-add-bg: #033a16;
+  --hl-del-bg: #67060c;
+  --hl-del: #ffdcd7;
+}
+.hljs-keyword,
+.hljs-doctag,
+.hljs-template-tag,
+.hljs-template-variable,
+.hljs-variable.language_,
+.hljs-meta .hljs-keyword {
+  color: var(--hl-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string {
+  color: var(--hl-string);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-attr,
+.hljs-attribute,
+.hljs-symbol,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id,
+.hljs-property,
+.hljs-operator,
+.hljs-meta {
+  color: var(--hl-number);
+}
+.hljs-title,
+.hljs-title.class_,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--hl-title);
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-variable,
+.hljs-params,
+.hljs-title.class_.inherited__ {
+  color: var(--hl-type);
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-code {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+.hljs-name,
+.hljs-tag,
+.hljs-selector-tag,
+.hljs-selector-pseudo,
+.hljs-bullet {
+  color: var(--hl-tag);
+}
+.hljs-section,
+.hljs-strong {
+  font-weight: 600;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-addition {
+  color: var(--hl-tag);
+  background: var(--hl-add-bg);
+}
+.hljs-deletion {
+  color: var(--hl-del);
+  background: var(--hl-del-bg);
+}
 .prose-note hr {
   @apply my-8 border-border;
 }
@@ -297,4 +418,36 @@
   --xy-controls-button-color: var(--text);
   --xy-controls-button-border-color: var(--border);
   --xy-attribution-background-color: transparent;
+  --xy-edge-label-background-color: var(--surface);
+  --xy-edge-label-color: var(--text);
+}
+/* Canvas cards size themselves: no React Flow node chrome around them (React Flow's stylesheet loads later, hence the extra class). */
+.react-flow .react-flow__node-text,
+.react-flow .react-flow__node-item,
+.react-flow .react-flow__node-link,
+.react-flow .react-flow__node-group {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none !important;
+}
+/* Rich text inside canvas cards: a bit smaller than a note page. */
+.prose-card {
+  @apply text-[0.875rem] leading-[1.6];
+}
+.prose-card > :first-child {
+  margin-top: 0;
+}
+.prose-card h1 {
+  @apply mt-3 text-lg;
+}
+.prose-card h2 {
+  @apply mt-3 text-base;
+}
+.prose-card h3 {
+  @apply mt-2 text-[0.95rem];
+}
+.prose-card pre {
+  @apply p-3 text-xs;
 }

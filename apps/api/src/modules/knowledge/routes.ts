@@ -6,6 +6,7 @@ import {
   zId,
   zMindMap,
   zMindMapCreate,
+  zMindMapListQuery,
   zMindMapSummary,
   zMindMapUpdate,
   zRelation,
@@ -161,11 +162,12 @@ export function knowledgeRoutes(app: ApiApp) {
       method: 'get',
       path: '/mind-maps',
       tags: mt,
-      summary: 'Listar mapas mentais',
+      summary: 'Listar mapas mentais e canvas (filtros opcionais: tipo, assunto, nota)',
       security: secured,
+      request: { query: zMindMapListQuery },
       responses: { 200: ok(z.array(zMindMapSummary)), ...errors },
     }),
-    async (c) => c.json({ data: await k.listMindMaps(c.env.DB, c.get('userId')) }, 200),
+    async (c) => c.json({ data: await k.listMindMaps(c.env.DB, c.get('userId'), c.req.valid('query')) }, 200),
   );
   app.openapi(
     createRoute({

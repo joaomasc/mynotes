@@ -2,10 +2,12 @@ import { z } from 'zod';
 import {
   GRAPH_ENTITY_TYPES,
   RELATION_KIND_LABELS,
+  analyzeDoc,
   zId,
   type GraphEdge,
   type GraphEntityType,
   type RelationKind,
+  type RichTextNode,
   type SearchEntityType,
 } from '@mynotes/shared';
 import { num, parseJson, str, strOrNull, stmt, type Row } from '../../../lib/db';
@@ -279,7 +281,7 @@ export const getMindMapTool = defineTool({
       const row = await stmt(ctx.db, 'SELECT * FROM mind_maps WHERE id = ? AND user_id = ?', a.map_id, ctx.userId).first<Row>();
       if (!row) return { error: 'not_found', message: 'Mapa mental não encontrado.' };
       const data = parseJson<{
-        nodes: { id: string; label: string; parentId: string | null; ref: { type: string; id: string; title?: string } | null }[];
+        nodes: { id: string; label: string; parentId: string | null; ref: { type: string; id: string; title?: string } | null; doc?: RichTextNode; url?: string }[];
         edges: { source: string; target: string; label: string }[];
       }>(row.data, { nodes: [], edges: [] });
       ctx.sources.add({ type: 'mindmap', id: a.map_id, title: str(row.title) }, 'read');
@@ -289,6 +291,8 @@ export const getMindMapTool = defineTool({
         const p = n.parentId && ids.has(n.parentId) ? n.parentId : null;
         byParent.set(p, [...(byParent.get(p) ?? []), n]);
       }
+      // Canvas cards keep their text in `doc` (text cards) or `url` (links).
+      for (const n of data.nodes) if (!n.label) n.label = (n.doc ? analyzeDoc(n.doc).text.replace(/s+/g, ' ').trim() : '') || n.url || '';
       const label = new Map(data.nodes.map((n) => [n.id, n.label]));
       const lines: string[] = [];
       const visit = (n: (typeof data.nodes)[number], depth: number, seen: Set<string>) => {
@@ -308,6 +312,7 @@ export const getMindMapTool = defineTool({
       return {
         id: a.map_id,
         link: linkOf('mindmap', a.map_id),
+        kind: str(row.kind),
         title: str(row.title),
         version: num(row.version),
         topic_id: strOrNull(row.topic_id),
@@ -354,12 +359,12 @@ export const getMindMapTool = defineTool({
       };
     }
     const maps = (
-      await stmt(ctx.db, 'SELECT id, title, topic_id, node_count, updated_at FROM mind_maps WHERE user_id = ? ORDER BY updated_at DESC LIMIT 40', ctx.userId).all<Row>()
+      await stmt(ctx.db, 'SELECT id, kind, title, topic_id, note_id, node_count, updated_at FROM mind_maps WHERE user_id = ? ORDER BY updated_at DESC LIMIT 40', ctx.userId).all<Row>()
     ).results;
     return {
       free_maps: maps.map((m) => {
         ctx.sources.add({ type: 'mindmap', id: str(m.id), title: str(m.title) });
-        return { id: str(m.id), link: linkOf('mindmap', str(m.id)), title: str(m.title), nodes: num(m.node_count), topic_id: strOrNull(m.topic_id) };
+        return { id: str(m.id), kind: str(m.kind), link: linkOf('mindmap', str(m.id)), title: str(m.title), nodes: num(m.node_count), topic_id: strOrNull(m.topic_id), note_id: strOrNull(m.note_id) };
       }),
       note: 'Cada assunto também tem um mapa gerado (use topic_id).',
     };

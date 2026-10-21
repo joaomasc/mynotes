@@ -135,6 +135,66 @@ describe('knowledge: relations, concepts, mind maps, graph', () => {
     expect(broken.status).toBe(400);
   });
 
+  it('keeps canvases with the maps: owned by a topic or note, cards with rich text, links and groups', async () => {
+    const topic = (await http.post('/topics', { title: 'História' })).body.data;
+    const note = (await http.post('/notes', { title: 'Revolução Francesa', topicId: topic.id })).body.data;
+    const canvas = (await http.post('/mind-maps', { title: 'Revisão', kind: 'canvas', topicId: topic.id, noteId: note.id })).body.data;
+    expect(canvas).toMatchObject({ kind: 'canvas', topicId: topic.id, noteId: note.id });
+    // A canvas starts empty (a mind map starts from its central idea).
+    expect(canvas.data.nodes).toHaveLength(0);
+    await http.post('/mind-maps', { title: 'Mapa', topicId: topic.id });
+
+    const text = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Queda da Bastilha ' },
+            { type: 'text', text: 'perigo', marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }] },
+          ],
+        },
+      ],
+    };
+    const data = {
+      nodes: [
+        { id: 'g', kind: 'group', position: { x: -40, y: -40 }, width: 800, height: 400, label: '1789' },
+        { id: 't', kind: 'text', position: { x: 0, y: 0 }, width: 280, height: 150, label: '', doc: text },
+        { id: 'n', kind: 'item', position: { x: 400, y: 0 }, width: 360, height: 320, label: '', ref: { type: 'note', id: note.id } },
+        { id: 'l', kind: 'link', position: { x: 0, y: 200 }, label: 'Wikipédia', url: 'https://pt.wikipedia.org/wiki/Revolução_Francesa' },
+      ],
+      edges: [{ id: 'e', source: 't', target: 'n', sourceHandle: 'right', targetHandle: 'left', arrow: 'end', color: '#b4372f', label: 'leva a' }],
+      viewport: null,
+    };
+    const saved = await http.patch(`/mind-maps/${canvas.id}`, { baseVersion: 1, data });
+    expect(saved.status).toBe(200);
+    const loaded = (await http.get(`/mind-maps/${canvas.id}`)).body.data;
+    expect(loaded.data.nodes.find((n: { id: string }) => n.id === 'g')).toMatchObject({ kind: 'group', width: 800, height: 400 });
+    expect(loaded.data.nodes.find((n: { id: string }) => n.id === 'n').ref.title).toBe('Revolução Francesa');
+    expect(loaded.data.edges[0]).toMatchObject({ sourceHandle: 'right', targetHandle: 'left', arrow: 'end', color: '#b4372f' });
+    // Unsafe links in text cards are dropped, as in notes.
+    const card = loaded.data.nodes.find((n: { id: string }) => n.id === 't');
+    expect(card.doc.content[0].content[1].marks).toEqual([]);
+    // The text of the cards is searchable.
+    const found = (await http.get('/search?q=bastilha')).body.data;
+    expect(found.map((r: { id: string }) => r.id)).toContain(canvas.id);
+
+    expect((await http.get('/mind-maps?kind=canvas')).body.data.map((m: { id: string }) => m.id)).toEqual([canvas.id]);
+    expect((await http.get(`/mind-maps?topicId=${topic.id}`)).body.data).toHaveLength(2);
+    expect((await http.get(`/mind-maps?noteId=${note.id}`)).body.data).toHaveLength(1);
+
+    const badUrl = await http.patch(`/mind-maps/${canvas.id}`, {
+      baseVersion: 2,
+      data: { nodes: [{ id: 'l', kind: 'link', position: { x: 0, y: 0 }, label: '', url: 'javascript:alert(1)' }], edges: [] },
+    });
+    expect(badUrl.status).toBe(400);
+
+    // Deleting the note for good frees the canvas instead of deleting it.
+    await http.del(`/notes/${note.id}`);
+    await http.del(`/trash/note/${note.id}`);
+    expect((await http.get(`/mind-maps/${canvas.id}`)).body.data.noteId).toBeNull();
+  });
+
   it('builds a graph with typed nodes and edges', async () => {
     const t = (await http.post('/topics', { title: 'Economia' })).body.data;
     const n = (await http.post('/notes', { title: 'Inflação', topicId: t.id })).body.data;

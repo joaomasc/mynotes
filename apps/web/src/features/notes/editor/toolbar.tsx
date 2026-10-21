@@ -25,6 +25,7 @@ import {
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/cn';
+import { lastCodeLanguage } from './code-block';
 import type { Dictation } from './dictation';
 import { useDictationState } from './dictation-bar';
 
@@ -178,7 +179,15 @@ export function EditorToolbar({
       <ToolButton label="Citação" active={s.quote} onClick={() => chain().toggleBlockquote().run()}>
         <Quote className={i} />
       </ToolButton>
-      <ToolButton label="Bloco de código" active={s.codeBlock} onClick={() => chain().toggleCodeBlock().run()}>
+      <ToolButton
+        label="Bloco de código (escolha a linguagem no topo do bloco, ou digite ```python)"
+        shortcut="Ctrl+Alt+C"
+        active={s.codeBlock}
+        onClick={() => {
+          const language = lastCodeLanguage();
+          chain().toggleCodeBlock(!s.codeBlock && language ? { language } : undefined).run();
+        }}
+      >
         <SquareCode className={i} />
       </ToolButton>
       <ToolButton label="Linha divisória" onClick={() => chain().setHorizontalRule().run()}>

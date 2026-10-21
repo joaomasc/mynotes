@@ -22,6 +22,10 @@ export const pageRoutes: RouteObject[] = [
   { path: 'study', ...page(() => import('@/features/study/study-page')) },
   { path: 'maps', ...page(() => import('@/features/mindmaps/maps-page')) },
   { path: 'maps/:id', ...page(() => import('@/features/mindmaps/map-page')) },
+  { path: 'canvas', ...page(() => import('@/features/canvas/canvases-page')) },
+  // Canvases are stored with the mind maps: the same page opens both.
+  { path: 'canvas/:id', ...page(() => import('@/features/mindmaps/map-page')) },
+  { path: 'daily', ...page(() => import('@/features/daily/daily-page')) },
   { path: 'graph', ...page(() => import('@/features/graph/graph-page')) },
   { path: 'concepts/:id', ...page(() => import('@/features/concepts/concept-page')) },
   { path: 'search', ...page(() => import('@/features/search/search-page')) },

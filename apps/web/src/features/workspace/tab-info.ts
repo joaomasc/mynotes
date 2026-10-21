@@ -23,6 +23,8 @@ const FIXED: [string, string, string][] = [
   ['/plans', 'Planos de leitura', 'plan'],
   ['/study', 'Estudos', 'session'],
   ['/maps', 'Mapas livres', 'mindmap'],
+  ['/canvas', 'Canvas', 'canvas'],
+  ['/daily', 'Notas diárias', 'daily'],
   ['/graph', 'Grafo', 'graph'],
   ['/search', 'Busca', 'search'],
   ['/assistant', 'Assistente', 'assistant'],
@@ -48,6 +50,7 @@ const ENTITY_ROUTES: [string, EntityType][] = [
   ['/readings/:id', 'reading'],
   ['/plans/:id', 'plan'],
   ['/maps/:id', 'mindmap'],
+  ['/canvas/:id', 'mindmap'],
   ['/concepts/:id', 'concept'],
 ];
 
@@ -94,7 +97,7 @@ export function usePathTitle(path: string, fallback?: string): { title: string; 
   const { tree } = useTopics();
   const key = queryKeyOf(target.entity);
   const data = useQuery({ queryKey: key ?? ['none'], queryFn: skipToken, enabled: false }).data as
-    | { title?: string; name?: string }
+    | { title?: string; name?: string; kind?: string }
     | undefined;
   let title: string;
   if (!target.entity) title = target.fixed ?? 'MyNotes';
@@ -106,7 +109,8 @@ export function usePathTitle(path: string, fallback?: string): { title: string; 
     title = t === undefined ? (fallback ?? '…') : t || 'Sem título';
     if (target.fixed === 'panel' && t !== undefined) title = `Anotações · ${title}`;
   }
-  return { title, icon: target.icon, target };
+  // Canvases share the mind maps' routes and data: the loaded data tells them apart.
+  return { title, icon: data?.kind === 'canvas' ? 'canvas' : target.icon, target };
 }
 
 /** The workspace pane a component is rendered in (absent in the phone layout). */

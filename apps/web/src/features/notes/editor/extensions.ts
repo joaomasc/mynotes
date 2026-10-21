@@ -3,6 +3,7 @@ import { TaskList } from '@tiptap/extension-task-list';
 import { Placeholder } from '@tiptap/extensions';
 import StarterKit from '@tiptap/starter-kit';
 import { INTERNAL_LINK_PREFIX, isAllowedHref } from '@mynotes/shared';
+import { CodeBlock } from './code-block';
 import { PropertiesNode } from './properties-node';
 import { ReferenceNode } from './reference-node';
 import { Triggers } from './triggers';
@@ -12,6 +13,8 @@ export function noteExtensions(placeholder: string) {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
+      // Replaced by the highlighted code block (language picker, indentation).
+      codeBlock: false,
       link: {
         openOnClick: false,
         autolink: true,
@@ -22,6 +25,7 @@ export function noteExtensions(placeholder: string) {
         HTMLAttributes: { rel: 'noopener noreferrer nofollow', target: null },
       },
     }),
+    CodeBlock,
     TaskList,
     TaskItem.configure({ nested: true }),
     Placeholder.configure({ placeholder }),

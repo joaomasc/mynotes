@@ -1,5 +1,6 @@
 import {
   MIND_MAP_MAX_BYTES,
+  analyzeDoc,
   normalizeAligned,
   utf8Length,
   uuidv7,
@@ -9,6 +10,7 @@ import {
   type ConceptUpdate,
   type MindMap,
   type MindMapData,
+  type MindMapKind,
   type MindMapSummary,
   zMindMapUpdate,
   type Relation,
@@ -230,7 +232,9 @@ const EMPTY_MAP: MindMapData = { nodes: [], edges: [], viewport: null };
 function toMindMapSummary(r: Row): MindMapSummary {
   return {
     id: str(r.id),
+    kind: str(r.kind) === 'canvas' ? 'canvas' : 'mindmap',
     topicId: strOrNull(r.topic_id),
+    noteId: strOrNull(r.note_id),
     title: str(r.title),
     nodeCount: num(r.node_count),
     version: num(r.version),
@@ -255,20 +259,30 @@ async function prepareMapData(db: D1Database, userId: string, title: string, dat
       else if (node.ref) node.ref.title = found.get(entityKey(node.ref.type, node.ref.id))!.title.slice(0, 300);
     }
   }
+  // Canvas text cards: unsafe links are dropped (as in notes) and the text is searchable.
+  const texts = data.nodes.map((n) => [n.label, n.doc ? analyzeDoc(n.doc).text : '', n.url ?? ''].join(' '));
   const json = JSON.stringify(data);
   if (utf8Length(json) > MIND_MAP_MAX_BYTES) throw tooLarge('O mapa mental excede o tamanho máximo');
-  const searchText = normalizeAligned([title, ...data.nodes.map((n) => n.label)].join(' ').normalize('NFC')).slice(
-    0,
-    100_000,
-  );
+  const searchText = normalizeAligned([title, ...texts].join(' ').normalize('NFC')).slice(0, 100_000);
   return { json, searchText, nodeCount: data.nodes.length };
 }
 
-export async function listMindMaps(db: D1Database, userId: string): Promise<MindMapSummary[]> {
+export async function listMindMaps(
+  db: D1Database,
+  userId: string,
+  q: { kind?: MindMapKind | undefined; topicId?: string | undefined; noteId?: string | undefined } = {},
+): Promise<MindMapSummary[]> {
+  let where = 'user_id = ?';
+  const binds: Bindable[] = [userId];
+  for (const [column, value] of [['kind', q.kind], ['topic_id', q.topicId], ['note_id', q.noteId]] as const) {
+    if (!value) continue;
+    where += ` AND ${column} = ?`;
+    binds.push(value);
+  }
   const rows = await all(
     db,
-    'SELECT id, topic_id, title, node_count, version, created_at, updated_at FROM mind_maps WHERE user_id = ? ORDER BY updated_at DESC',
-    userId,
+    `SELECT id, kind, topic_id, note_id, title, node_count, version, created_at, updated_at FROM mind_maps WHERE ${where} ORDER BY updated_at DESC`,
+    ...binds,
   );
   return rows.map(toMindMapSummary);
 }
@@ -282,7 +296,14 @@ export async function getMindMap(db: D1Database, userId: string, id: string): Pr
 export async function createMindMap(
   db: D1Database,
   userId: string,
-  input: { id?: string | undefined; topicId: string | null; title: string; data?: MindMapData | undefined },
+  input: {
+    id?: string | undefined;
+    kind?: MindMapKind | undefined;
+    topicId: string | null;
+    noteId?: string | null | undefined;
+    title: string;
+    data?: MindMapData | undefined;
+  },
 ): Promise<{ map: MindMap; created: boolean }> {
   const id = input.id ?? uuidv7();
   const existing = await first(db, 'SELECT * FROM mind_maps WHERE id = ?', id);
@@ -291,9 +312,12 @@ export async function createMindMap(
     return { map: toMindMap(existing), created: false };
   }
   await assertReference(db, 'topics', input.topicId, userId);
+  await assertReference(db, 'notes', input.noteId, userId);
+  const kind = input.kind ?? 'mindmap';
   const title = input.title.normalize('NFC');
   const data: MindMapData = input.data ?? {
-    nodes: [{ id: 'root', position: { x: 0, y: 0 }, label: title, color: null, ref: null, parentId: null }],
+    // A mind map starts from its central idea; a canvas, empty.
+    nodes: kind === 'canvas' ? [] : [{ id: 'root', position: { x: 0, y: 0 }, label: title, color: null, ref: null, parentId: null }],
     edges: [],
     viewport: null,
   };
@@ -302,11 +326,13 @@ export async function createMindMap(
   const [inserted] = await db.batch([
     stmt(
       db,
-      `INSERT INTO mind_maps (id, user_id, topic_id, title, data, node_count, search_text, version, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?) RETURNING *`,
+      `INSERT INTO mind_maps (id, user_id, kind, topic_id, note_id, title, data, node_count, search_text, version, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) RETURNING *`,
       id,
       userId,
+      kind,
       input.topicId,
+      input.noteId ?? null,
       title,
       prepared.json,
       prepared.nodeCount,
@@ -322,9 +348,11 @@ export async function createMindMap(
 export async function updateMindMap(db: D1Database, userId: string, id: string, input: z.infer<typeof zMindMapUpdate>): Promise<MindMapSummary> {
   const current = await getMindMap(db, userId, id);
   if (input.topicId !== undefined) await assertReference(db, 'topics', input.topicId, userId);
+  if (input.noteId !== undefined) await assertReference(db, 'notes', input.noteId, userId);
   const title = (input.title ?? current.title).normalize('NFC');
   const set: Record<string, Bindable> = { title };
   if (input.topicId !== undefined) set.topic_id = input.topicId;
+  if (input.noteId !== undefined) set.note_id = input.noteId;
   const prepared = await prepareMapData(db, userId, title, input.data ?? current.data);
   set.search_text = prepared.searchText;
   if (input.data) {

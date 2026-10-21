@@ -3,11 +3,13 @@ import { Dialog as RDialog } from 'radix-ui';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   BookOpen,
+  CalendarDays,
   ChevronRight,
   Ellipsis,
   FolderPlus,
   FolderTree,
   House,
+  LayoutDashboard,
   LibraryBig,
   ListTodo,
   LogOut,
@@ -59,8 +61,10 @@ import { SyncIndicator } from './sync-indicator';
 const NAV = [
   { to: '/', label: 'Início', icon: House, end: true, also: [] as string[] },
   { to: '/notes', label: 'Notas', icon: StickyNote, also: [] },
+  { to: '/daily', label: 'Notas diárias', icon: CalendarDays, also: [] },
   { to: '/library', label: 'Biblioteca', icon: LibraryBig, also: ['/readings'] },
   { to: '/graph', label: 'Grafo', icon: Waypoints, also: [] },
+  { to: '/canvas', label: 'Canvas', icon: LayoutDashboard, also: [] },
   { to: '/assistant', label: 'Assistente', icon: Sparkles, also: [] },
   { to: '/speaking', label: 'Oratória', icon: Mic, also: [] },
 ];
@@ -102,6 +106,7 @@ function useQuickCreate(): { items: MenuEntry[]; dialog: ReactNode } {
     'separator',
     { label: 'Novo livro ou leitura', icon: <BookOpen />, onSelect: () => void navigate(`/library?new=book${withTopic}`) },
     { label: 'Enviar documento', icon: <Upload />, onSelect: () => void navigate(`/library?upload=1${withTopic}`) },
+    { label: topic ? `Canvas em “${topic.title}”` : 'Novo canvas', icon: <LayoutDashboard />, onSelect: () => void navigate(`/canvas?new=1${withTopic}`) },
   );
   const dialog = (
     <TopicFormDialog open={!!topicDialog} onOpenChange={(o) => !o && setTopicDialog(null)} parentId={topicDialog?.parentId ?? null} />

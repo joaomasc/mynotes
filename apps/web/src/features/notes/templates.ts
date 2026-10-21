@@ -58,9 +58,27 @@ export function templateBlocks(doc: RichTextDoc): RichTextNode[] {
   return blocks;
 }
 
-/** Opens today's daily note, creating it (from its template) when it doesn't exist yet. */
-export async function dailyNote(qc: QueryClient, settings: NoteSettings, topicTitle: string): Promise<Note> {
-  const title = formatDate(settings.dailyFormat);
+/**
+ * The day a daily note's title stands for ("2026-10-21" with "YYYY-MM-DD"),
+ * like Obsidian recognizes daily notes by their file name. Null for any other title.
+ */
+export function parseDailyTitle(format: string, title: string): Date | null {
+  const order: string[] = [];
+  const pattern = format.replace(/YYYY|MM|DD|HH|mm|[.*+?^${}()|[\]\\]/g, (token) => {
+    if (token.length === 1) return `\\${token}`;
+    order.push(token);
+    return token === 'YYYY' ? '(\\d{4})' : '(\\d{2})';
+  });
+  const match = new RegExp(`^${pattern}$`).exec(title.trim());
+  if (!match || !['YYYY', 'MM', 'DD'].every((t) => order.includes(t))) return null;
+  const part = (token: string) => Number(match[order.indexOf(token) + 1]);
+  const date = new Date(part('YYYY'), part('MM') - 1, part('DD'));
+  return date.getMonth() === part('MM') - 1 && date.getDate() === part('DD') ? date : null;
+}
+
+/** Opens the daily note of a day (today by default), creating it (from its template) when it doesn't exist yet. */
+export async function dailyNote(qc: QueryClient, settings: NoteSettings, topicTitle: string, date = new Date()): Promise<Note> {
+  const title = formatDate(settings.dailyFormat, date);
   const results = await endpoints.search(title, 'note', 30);
   const found = results.find((r) => r.type === 'note' && r.title === title && (r.topicId ?? null) === settings.dailyTopicId);
   if (found) return endpoints.notes.get(found.id);
@@ -68,7 +86,7 @@ export async function dailyNote(qc: QueryClient, settings: NoteSettings, topicTi
   if (settings.dailyTemplateId) {
     try {
       const template = await endpoints.notes.get(settings.dailyTemplateId);
-      content = fillTemplate(template.content, { title, topic: topicTitle });
+      content = fillTemplate(template.content, { title, topic: topicTitle, date });
     } catch {
       // template deleted: start empty
     }

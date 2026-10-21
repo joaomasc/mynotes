@@ -226,6 +226,8 @@ export const BACKUP_TABLES = {
     row: z.object({
       id: zId,
       topic_id: zId.nullable(),
+      kind: z.enum(['mindmap', 'canvas']).default('mindmap'),
+      note_id: zId.nullable().default(null),
       title: str(500),
       data: str(1_000_000),
       node_count: int.min(0),

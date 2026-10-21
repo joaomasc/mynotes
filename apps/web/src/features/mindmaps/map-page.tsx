@@ -35,6 +35,7 @@ import { cn } from '@/lib/cn';
 import { TOPIC_COLORS } from '@/lib/entities';
 import { useBeforeUnloadGuard } from '@/lib/hooks';
 import { qk } from '@/lib/query';
+import { CanvasEditor } from '../canvas/canvas-editor';
 import { EntityPicker } from '../shared/entity-picker';
 import { FavoriteButton } from '../shared/favorite-button';
 import { useRecordView } from '../shared/use-view';
@@ -439,7 +440,10 @@ export function Component() {
   const { id = '' } = useParams();
   const query = useQuery({ queryKey: qk.mindMap(id), queryFn: () => endpoints.mindMaps.get(id), staleTime: 0, refetchOnWindowFocus: false });
   useRecordView('mindmap', id, query.isSuccess);
-  if (query.isLoading) return <PageLoader />;
+  // The editor keeps its own copy from the first data it gets: never the one persisted on this
+  // device (possibly older than the server's), except offline, where it is the best available.
+  const fresh = query.isFetchedAfterMount || (!!query.data && (query.isError || !navigator.onLine));
+  if (query.isLoading || (query.data && !fresh)) return <PageLoader />;
   if (!query.data) {
     if (query.error instanceof ApiError && query.error.status === 404) {
       return <EmptyState className="mt-16" icon={<GitBranch />} title="Mapa não encontrado" action={<Link to="/maps" className="text-accent">Ver mapas</Link>} />;
@@ -448,7 +452,7 @@ export function Component() {
   }
   return (
     <ReactFlowProvider>
-      <Editor key={query.data.id} map={query.data} />
+      {query.data.kind === 'canvas' ? <CanvasEditor key={query.data.id} map={query.data} /> : <Editor key={query.data.id} map={query.data} />}
     </ReactFlowProvider>
   );
 }

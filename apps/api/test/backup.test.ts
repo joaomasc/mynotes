@@ -63,6 +63,7 @@ async function seed(http: Http) {
   await http.post('/relations', { sourceType: 'note', sourceId: n1.id, targetType: 'topic', targetId: t1.id });
   await http.post('/favorites', { entityType: 'note', entityId: n1.id });
   await http.post('/mind-maps', { title: 'Mapa' });
+  await http.post('/mind-maps', { title: 'Quadro', kind: 'canvas', noteId: n1.id });
   await http.put('/settings/ui', { value: { theme: 'dark' } });
   return { t1, t2, n1, doc };
 }
@@ -98,6 +99,7 @@ describe('backup', () => {
     expect(restored.content.content[0].content[0].text).toBe('Preços sobem');
     expect((await a.get('/topics')).body.data).toHaveLength(2);
     expect((await a.get('/favorites')).body.data).toHaveLength(1);
+    expect((await a.get('/mind-maps?kind=canvas')).body.data).toMatchObject([{ title: 'Quadro', noteId: n1.id }]);
     expect((await a.get('/plans')).body.data[0].itemCount).toBe(1);
     const sessions = (await a.get('/study-sessions')).body.data;
     expect(sessions[0].noteIds).toEqual([n1.id]);

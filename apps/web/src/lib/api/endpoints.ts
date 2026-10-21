@@ -26,6 +26,7 @@ import type {
   ImportResult,
   MindMap,
   MindMapCreate,
+  MindMapListQuery,
   MindMapSummary,
   MindMapUpdate,
   Note,
@@ -209,7 +210,7 @@ export const endpoints = {
   },
 
   mindMaps: {
-    list: () => api.get<MindMapSummary[]>('/mind-maps'),
+    list: (q?: MindMapListQuery) => api.get<MindMapSummary[]>('/mind-maps', q),
     get: (id: string) => api.get<MindMap>(`/mind-maps/${id}`),
     create: (body: MindMapCreate) => api.post<MindMap>('/mind-maps', body),
     update: (id: string, body: MindMapUpdate) => api.patch<MindMapSummary>(`/mind-maps/${id}`, body, { retries: 0 }),

@@ -8,7 +8,7 @@ import {
   RELATION_KINDS,
   SEARCH_ENTITY_TYPES,
 } from '../constants';
-import { zDate, zDateTime, zId, zTitle, zTrimmed, zVersion } from './common';
+import { zDate, zDateTime, zId, zRichTextDoc, zTitle, zTrimmed, zVersion } from './common';
 import { zBacklink, zNoteRole, zNoteSummary, zReading, zTagCount, zTopicWithCounts, zUpcomingGoal } from './content';
 
 const zTimestamps = {
@@ -162,6 +162,21 @@ export const zRelationListQuery = z.object({
 
 /* -------------------------------------------------------------- Mind maps */
 
+/**
+ * A free mind map, or a canvas (like Obsidian's): resizable cards of text,
+ * items (notes, topics…), web links and groups, joined by arrows. Both live in
+ * the same table; a canvas can belong to a topic or to a note.
+ */
+export const MIND_MAP_KINDS = ['mindmap', 'canvas'] as const;
+export const zMindMapKind = z.enum(MIND_MAP_KINDS);
+export type MindMapKind = z.infer<typeof zMindMapKind>;
+
+/** Canvas cards. Absent on mind map nodes (an "idea": label + optional link). */
+export const CANVAS_CARD_KINDS = ['text', 'item', 'link', 'group'] as const;
+
+const zColorHex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const zCardSize = z.number().finite().min(40).max(5000);
+
 export const zMindMapNode = z.object({
   id: z.string().min(1).max(64),
   position: z.object({ x: z.number().finite(), y: z.number().finite() }),
@@ -173,6 +188,18 @@ export const zMindMapNode = z.object({
     .nullable()
     .default(null),
   parentId: z.string().max(64).nullable().default(null),
+  /* Canvas only. */
+  kind: z.enum(CANVAS_CARD_KINDS).optional(),
+  width: zCardSize.optional(),
+  height: zCardSize.optional(),
+  /** Text card content, with "/" references like a note. */
+  doc: zRichTextDoc.optional(),
+  /** Link card. */
+  url: z
+    .string()
+    .max(2048)
+    .regex(/^https?:\/\//i, 'Use um endereço http(s)')
+    .optional(),
 });
 export type MindMapNode = z.infer<typeof zMindMapNode>;
 
@@ -181,6 +208,11 @@ export const zMindMapEdge = z.object({
   source: z.string().min(1).max(64),
   target: z.string().min(1).max(64),
   label: z.string().max(200).default(''),
+  /* Canvas only: the sides joined, color and arrowheads. */
+  sourceHandle: z.string().max(16).nullable().optional(),
+  targetHandle: z.string().max(16).nullable().optional(),
+  color: zColorHex.nullable().optional(),
+  arrow: z.enum(['none', 'end', 'both']).optional(),
 });
 export type MindMapEdge = z.infer<typeof zMindMapEdge>;
 
@@ -209,7 +241,10 @@ export type MindMapData = z.infer<typeof zMindMapData>;
 
 export const zMindMapSummary = z.object({
   id: zId,
+  kind: zMindMapKind,
   topicId: zId.nullable(),
+  /** Note the canvas belongs to (canvases only). */
+  noteId: zId.nullable(),
   title: z.string(),
   nodeCount: z.number().int(),
   ...zTimestamps,
@@ -221,7 +256,9 @@ export type MindMap = z.infer<typeof zMindMap>;
 
 export const zMindMapCreate = z.object({
   id: zId.optional(),
+  kind: zMindMapKind.default('mindmap'),
   topicId: zId.nullable().default(null),
+  noteId: zId.nullable().default(null),
   title: zTitle(200),
   data: zMindMapData.optional(),
 });
@@ -230,10 +267,18 @@ export type MindMapCreate = z.input<typeof zMindMapCreate>;
 export const zMindMapUpdate = z.object({
   baseVersion: zVersion,
   topicId: zId.nullable().optional(),
+  noteId: zId.nullable().optional(),
   title: zTitle(200).optional(),
   data: zMindMapData.optional(),
 });
 export type MindMapUpdate = z.input<typeof zMindMapUpdate>;
+
+export const zMindMapListQuery = z.object({
+  kind: zMindMapKind.optional(),
+  topicId: zId.optional(),
+  noteId: zId.optional(),
+});
+export type MindMapListQuery = z.input<typeof zMindMapListQuery>;
 
 /* ------------------------------------------------------------------ Graph */
 

@@ -11,6 +11,7 @@ import {
   FileClock,
   FolderInput,
   Info,
+  LayoutDashboard,
   PanelRightClose,
   RefreshCw,
   Trash,
@@ -30,6 +31,8 @@ import { useLocalPreference } from '@/lib/hooks';
 import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
 import { notesSync, type NoteDraft, type SaveState } from '@/lib/sync/notes-sync';
+import { CanvasList, useCreateCanvas } from '../canvas/use-canvases';
+import { DailyNav } from '../daily/daily-nav';
 import { FavoriteButton } from '../shared/favorite-button';
 import { RelationsPanel } from '../shared/relations-panel';
 import { TopicBreadcrumb } from '../shared/topic-breadcrumb';
@@ -214,6 +217,10 @@ function NoteInfo({ note }: { note: Note }) {
       )}
       <RelationsPanel type="note" id={note.id} title={note.title} />
       <div>
+        <h3 className="mb-2 text-[13px] font-semibold text-muted">Canvas desta nota</h3>
+        <CanvasList noteId={note.id} title={note.title} compact />
+      </div>
+      <div>
         <h3 className="mb-2 text-[13px] font-semibold text-muted">Mencionada em</h3>
         <BacklinkList items={back.data} empty="Nenhuma outra nota cita esta. Em outra nota, digite / e o título desta." />
       </div>
@@ -256,6 +263,7 @@ export function Component() {
   const initial = initialState?.id === id ? initialState : null;
   const [conflict, setConflict] = useState<Note | null>(null);
   const saveState = useSaveState(id);
+  const createCanvas = useCreateCanvas();
 
   const noteQuery = useQuery({ queryKey: qk.note(id), queryFn: ({ signal }) => endpoints.notes.get(id, signal), staleTime: 0 });
   const note = noteQuery.data;
@@ -448,12 +456,20 @@ export function Component() {
                   },
                 },
                 { label: 'Histórico de versões', icon: <FileClock />, onSelect: () => setDialog('history') },
+                {
+                  label: 'Novo canvas desta nota',
+                  icon: <LayoutDashboard />,
+                  onSelect: () =>
+                    createCanvas.mutate({ title: `Canvas — ${note.title || 'Sem título'}`, noteId: id, topicId: note.topicId, first: { type: 'note', id, title: note.title } }),
+                },
                 'separator',
                 { label: 'Excluir', icon: <Trash />, danger: true, onSelect: () => void remove() },
               ]}
             />
           </div>
         </div>
+
+        <DailyNav note={note} />
 
         {conflict && (
           <ConflictBanner

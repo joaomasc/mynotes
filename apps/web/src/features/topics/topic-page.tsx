@@ -28,6 +28,7 @@ import { endpoints } from '@/lib/api/endpoints';
 import { duration, fileSize, plural, relativeTime } from '@/lib/format';
 import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
+import { CanvasList } from '../canvas/use-canvases';
 import { NoteListItem } from '../notes/note-list-item';
 import { BacklinkList, TagChips } from '../notes/note-page';
 import { useCreateNote } from '../notes/use-create-note';
@@ -314,6 +315,10 @@ export function Component() {
                 action={<Button size="sm" variant="outline" onClick={() => createNote.mutate(topic.id)}>Escrever a primeira</Button>}
               />
             )}
+          </Section>
+
+          <Section title="Canvas">
+            <CanvasList topicId={topic.id} title={topic.title} />
           </Section>
 
           <Books context={context.data} onNew={() => setDialog('book')} />
