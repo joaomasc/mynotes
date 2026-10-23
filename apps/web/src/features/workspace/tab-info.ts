@@ -37,6 +37,11 @@ const FIXED: [string, string, string][] = [
   ['/speaking/attempts/:id/banca', 'Banca', 'speaking'],
   ['/speaking/compare', 'Comparar falas', 'speaking'],
   ['/speaking/projects/:id', 'Discurso', 'speaking'],
+  ['/review', 'Revisar', 'review'],
+  ['/review/session/:id', 'Sessão de revisão', 'review'],
+  ['/review/cards', 'Cartões', 'review'],
+  ['/review/proposals', 'Sugestões da IA', 'review'],
+  ['/review/stats', 'Estatísticas da revisão', 'review'],
   ['/settings', 'Configurações', 'settings'],
   ['/trash', 'Lixeira', 'trash'],
 ];

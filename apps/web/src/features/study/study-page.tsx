@@ -104,6 +104,7 @@ function SessionRow({ s, onEdit, onDelete }: { s: StudySession; onEdit: () => vo
             {format(d, 'HH:mm')} · {duration(s.durationSeconds)}
           </span>
           {s.source === 'timer' && <span>· cronômetro</span>}
+          {s.source === 'review' && <span>· revisão</span>}
           {s.progressRating && (
             <span className="inline-flex items-center gap-0.5" aria-label={`Progresso ${s.progressRating} de 5`}>
               <Star className="size-3 fill-warning text-warning" aria-hidden /> {s.progressRating}/5

@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import {
   BookOpen,
+  Brain,
   Ellipsis,
   FileText,
   FolderInput,
@@ -239,6 +240,13 @@ export function Component() {
               className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-2"
             >
               <Network className="size-4" aria-hidden /> <span className="hidden sm:inline">Mapa</span>
+            </Link>
+            <Link
+              to={`/review?topics=${topic.id}`}
+              title="Revisar este assunto e os subassuntos (cartões e perguntas)"
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-2"
+            >
+              <Brain className="size-4" aria-hidden /> <span className="hidden sm:inline">Revisar</span>
             </Link>
             <Link
               to={`/graph?focus=topic:${topic.id}`}

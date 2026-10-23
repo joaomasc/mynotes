@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { zReviewSettings } from './review';
 import { zSpeechSettings } from './speech-path';
 import {
   DESCRIPTION_MAX,
@@ -27,7 +28,8 @@ export const zStudySession = z.object({
   objective: z.string(),
   notes: z.string(),
   progressRating: z.number().int().min(1).max(5).nullable(),
-  source: z.enum(['manual', 'timer']),
+  /** review: written by a review session (Revisar). */
+  source: z.enum(['manual', 'timer', 'review']),
   noteIds: z.array(zId),
   documentIds: z.array(zId),
   ...zTimestamps,
@@ -575,6 +577,7 @@ export const SETTINGS_SCHEMAS = {
   study_timer: zStudyTimer,
   study_goals: zStudyGoals,
   speech: zSpeechSettings,
+  review: zReviewSettings,
 } as const;
 export type SettingKey = keyof typeof SETTINGS_SCHEMAS;
 export const SETTING_KEYS = Object.keys(SETTINGS_SCHEMAS) as SettingKey[];

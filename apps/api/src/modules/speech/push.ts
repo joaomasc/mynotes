@@ -16,7 +16,7 @@ import { nowIso } from '../../lib/time';
 
 type PushEnv = Partial<Record<'VAPID_PUBLIC_KEY' | 'VAPID_PRIVATE_KEY' | 'VAPID_SUBJECT', string>>;
 
-interface Vapid {
+export interface Vapid {
   publicKey: string;
   privateKey: CryptoKey;
   subject: string;
@@ -34,7 +34,7 @@ const concat = (...parts: Uint8Array[]) => {
 };
 
 /** The server's VAPID keys, or null when reminders are not configured. */
-async function vapid(env: Env): Promise<Vapid | null> {
+export async function vapid(env: Env): Promise<Vapid | null> {
   const e = env as unknown as PushEnv;
   const pub = e.VAPID_PUBLIC_KEY?.trim();
   const priv = e.VAPID_PRIVATE_KEY?.trim();
@@ -89,7 +89,7 @@ export async function vapidAuthorization(keys: Vapid, endpoint: string, now = Da
 }
 
 /** Sends one notification; returns the push service's status (404/410: the subscription is gone). */
-async function send(keys: Vapid, sub: { endpoint: string; p256dh: string; auth: string }, message: object): Promise<number> {
+export async function send(keys: Vapid, sub: { endpoint: string; p256dh: string; auth: string }, message: object): Promise<number> {
   const body = await encryptPayload(sub, enc.encode(JSON.stringify(message)));
   const res = await fetch(sub.endpoint, {
     method: 'POST',
@@ -136,7 +136,7 @@ export async function unsubscribe(env: Env, userId: string, endpoint: string): P
   return pushStatus(env, userId);
 }
 
-const REMINDER = { title: 'MyNotes · Oratória', body: 'Que tal alguns minutos de treino hoje? A sua sessão do dia está esperando.', url: '/speaking' };
+const REMINDER = { title: 'MyNotes · Oratória', body: 'Que tal alguns minutos de treino hoje? A sua sessão do dia está esperando.', url: '/speaking', tag: 'mynotes-speaking' };
 
 /** Sends a test notification to every browser of the user; returns how many accepted it. */
 export async function sendTest(env: Env, userId: string): Promise<{ sent: number }> {

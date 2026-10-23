@@ -15,7 +15,7 @@ import { endpoints } from '@/lib/api/endpoints';
 import { disablePush, enablePush } from '@/lib/push';
 import { cn } from '@/lib/cn';
 import { qk } from '@/lib/query';
-import { useUpdateSetting } from '../settings/use-settings';
+import { useSetting, useUpdateSetting } from '../settings/use-settings';
 import { TrendChart } from './trend-chart';
 import { useSpeechPath } from './use-speech-path';
 
@@ -105,6 +105,7 @@ function Calibration({ settings, talks }: { settings: SpeechSettings; talks: { w
 /** Keep recordings and the daily reminder (Web Push). */
 function AudioAndReminder({ settings }: { settings: SpeechSettings }) {
   const update = useUpdateSetting('speech');
+  const reviewReminder = useSetting('review').value.reminder.enabled;
   const push = useQuery({ queryKey: ['speech-push'], queryFn: endpoints.speech.pushStatus });
   const [time, setTime] = useState(settings.reminder.time);
   const [busy, setBusy] = useState(false);
@@ -118,7 +119,8 @@ function AudioAndReminder({ settings }: { settings: SpeechSettings }) {
       if (on) {
         if (!push.data?.publicKey) throw new Error('Os lembretes não estão configurados neste servidor.');
         await enablePush(push.data.publicKey);
-      } else {
+      } else if (!reviewReminder) {
+        // The browser stays subscribed while the review reminder uses it.
         await disablePush();
       }
       save({ reminder: { enabled: on, time, tzOffsetMinutes: -new Date().getTimezoneOffset() } }, on ? 'Lembrete ativado.' : 'Lembrete desativado.');

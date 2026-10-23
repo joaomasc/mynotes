@@ -57,6 +57,10 @@ curl https://mynotes-api.<subdomínio>.workers.dev/api/v1/health
 
 A documentação interativa da API fica em `/api/v1/docs` (OpenAPI em `/api/v1/openapi.json`).
 
+### Revisar: migração 0010
+
+A migração `0010_review.sql` cria as tabelas da Revisão e **recria `study_sessions`** para aceitar sessões de origem "revisão" (o SQLite não altera uma restrição `CHECK`): as linhas e os vínculos com notas e documentos são copiados e devolvidos na mesma migração. Por ter `DROP TABLE` e `ALTER TABLE … RENAME`, o workflow a trata como destrutiva. Antes de aplicar: exporte um backup pelo app e anote o horário (para um eventual *Time Travel*). Depois, como sempre, `npm run db:migrate:remote -w @mynotes/api` e só então `npm run deploy -w @mynotes/api` e o frontend. O lembrete da Revisão usa as mesmas chaves VAPID da Oratória.
+
 ### Oratória: gravações, avaliação completa e lembretes
 
 As migrações `0005` a `0008` (oratória) só criam tabelas e colunas: aplique-as com `npm run db:migrate:remote` **antes** de publicar o Worker, como sempre. As gravações guardadas usam o mesmo bucket R2 dos documentos (prefixo `speech/`). A avaliação completa usa a mesma `OPENAI_API_KEY` (modelo em `AI_AUDIO_MODEL`, veja [ai.md](ai.md#configuração)).

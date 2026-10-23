@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Brain,
   CalendarDays,
   CalendarPlus,
   Columns2,
@@ -40,6 +41,7 @@ import {
   Waypoints,
   X,
 } from 'lucide-react';
+import { uuidv7 } from '@mynotes/shared';
 import { errorMessage } from '@/lib/api/client';
 import { activeEditor } from '@/lib/active-editor';
 import { effectiveHotkey, eventToHotkey, useHotkeyOverrides } from '@/lib/hotkeys';
@@ -163,6 +165,8 @@ function useAppCommands(ui: UiActions): Command[] {
       { id: 'go.plans', label: 'Ir para Planos de leitura', group: nav, icon: <ListTodo />, run: go('/plans') },
       { id: 'go.study', label: 'Ir para Diário de estudos', group: nav, icon: <CalendarDays />, run: go('/study') },
       { id: 'go.speaking', label: 'Ir para Oratória (treinar uma fala)', group: nav, icon: <Mic />, run: go('/speaking') },
+      { id: 'go.review', label: 'Ir para Revisar (cartões e perguntas das notas)', group: nav, icon: <Brain />, run: go('/review') },
+      { id: 'review.now', label: 'Revisar agora o que vence hoje', group: nav, icon: <Brain />, run: () => void navigate(`/review/session/${uuidv7()}?mode=due`) },
       { id: 'go.tags', label: 'Ver tags', group: nav, icon: <Hash />, run: go('/search?tags=1') },
       { id: 'go.broken', label: 'Ver referências quebradas', group: nav, icon: <Link2Off />, run: go('/search?broken=1') },
       { id: 'go.settings', label: 'Configurações', group: nav, icon: <Settings />, run: go('/settings') },

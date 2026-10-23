@@ -13,6 +13,7 @@ import { qk } from '@/lib/query';
 import { useCreateNote } from '../notes/use-create-note';
 import { TopicChip } from '../shared/topic-breadcrumb';
 import { useSetting } from '../settings/use-settings';
+import { ReviewHomeCard } from '../review/dashboard-card';
 import { SpeakingCard } from '../speaking/dashboard-card';
 
 function greeting(): string {
@@ -198,6 +199,7 @@ export function Component() {
             </div>
 
             <div className="space-y-8">
+              <ReviewHomeCard />
               <SpeakingCard />
               {(data.study.recent.length > 0 || weeklyGoal > 0) && (
               <Section title="Tempo de estudo" action={<Link to="/study" className="text-xs text-accent hover:underline">Histórico</Link>}>

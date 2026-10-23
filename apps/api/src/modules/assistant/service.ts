@@ -46,11 +46,12 @@ import { canvasTools } from './tools/canvas';
 import { dailyTools } from './tools/daily';
 import { graphTools } from './tools/graph';
 import { hybridSearch, presentResults, readTools } from './tools/read';
+import { reviewTools } from './tools/review';
 import { SourceCollector, truncate, type SourceInfo, type ToolContext, type ToolOutput } from './tools/types';
 import { writeTools } from './tools/write';
 
 /** Explicit list of what the model may call. Nothing else is reachable (no SQL, no R2, no HTTP). */
-export const TOOLS = [...readTools, ...graphTools, ...dailyTools, ...writeTools, ...canvasTools];
+export const TOOLS = [...readTools, ...graphTools, ...dailyTools, ...writeTools, ...canvasTools, ...reviewTools];
 const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 const FUNCTION_TOOLS: FunctionTool[] = TOOLS.map((t) => ({
   type: 'function',
@@ -301,6 +302,8 @@ const TOOL_NAMES: Record<string, string> = {
   write_daily_note: 'Nota diária',
   create_canvas: 'Criar canvas',
   update_canvas: 'Alterar canvas',
+  get_review_status: 'Revisões de hoje',
+  create_review_cards: 'Cartões de revisão',
   web_search: 'Pesquisa na web',
 };
 

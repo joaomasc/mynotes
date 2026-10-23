@@ -3,9 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import {
+  Brain,
   Check,
   CloudOff,
   BookOpen,
+  Layers,
+  Sparkles,
   Copy,
   Ellipsis,
   FileClock,
@@ -32,6 +35,8 @@ import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
 import { notesSync, type NoteDraft, type SaveState } from '@/lib/sync/notes-sync';
 import { CanvasList, useCreateCanvas } from '../canvas/use-canvases';
+import { CardDialog, type CardDraft } from '../review/card-dialog';
+import { GenerateDialog } from '../review/generate-dialog';
 import { DailyNav } from '../daily/daily-nav';
 import { FavoriteButton } from '../shared/favorite-button';
 import { RelationsPanel } from '../shared/relations-panel';
@@ -256,7 +261,8 @@ export function Component() {
   const wideScreen = useWideView(1024);
   const [panelPref, setPanelPref] = useLocalPreference('mynotes:note-panel', true);
   const [panelSheet, setPanelSheet] = useState(false);
-  const [dialog, setDialog] = useState<'move' | 'history' | null>(null);
+  const [dialog, setDialog] = useState<'move' | 'history' | 'questions' | null>(null);
+  const [cardDraft, setCardDraft] = useState<CardDraft | null>(null);
   const [moveTo, setMoveTo] = useState<string | null>(null);
   const [initialState, setInitial] = useState<{ id: string; title: string; content: RichTextDoc; restored: boolean } | null>(null);
   // Only the content decided for this note: right after moving to another note, the previous one's must never reach its editor.
@@ -456,6 +462,20 @@ export function Component() {
                   },
                 },
                 { label: 'Histórico de versões', icon: <FileClock />, onSelect: () => setDialog('history') },
+                'separator',
+                {
+                  label: 'Criar cartão (com o trecho selecionado)',
+                  icon: <Brain />,
+                  onSelect: () => {
+                    // The passage selected in the text becomes the source of the card.
+                    const editor = editorRef.current?.editor;
+                    const sel = editor ? editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, '\n', ' ').trim() : '';
+                    setCardDraft({ kind: sel ? 'cloze' : 'basic', front: sel, noteId: id, noteTitle: note.title || 'Sem título', sourceQuote: sel.slice(0, 2000) });
+                  },
+                },
+                { label: 'Gerar perguntas desta nota (IA)', icon: <Sparkles />, onSelect: () => setDialog('questions') },
+                { label: 'Cartões desta nota', icon: <Layers />, onSelect: () => void navigate(`/review/cards?noteId=${id}`) },
+                'separator',
                 {
                   label: 'Novo canvas desta nota',
                   icon: <LayoutDashboard />,
@@ -531,6 +551,8 @@ export function Component() {
           {(p) => <TopicSelect {...p} value={moveTo} onChange={setMoveTo} emptyLabel="Sem assunto" />}
         </Field>
       </Dialog>
+      <CardDialog open={!!cardDraft} onOpenChange={(o) => !o && setCardDraft(null)} draft={cardDraft ?? undefined} />
+      <GenerateDialog open={dialog === 'questions'} onOpenChange={(o) => !o && setDialog(null)} noteId={id} label={`a nota “${note.title || 'Sem título'}”`} />
       <RevisionsDialog
         noteId={id}
         open={dialog === 'history'}

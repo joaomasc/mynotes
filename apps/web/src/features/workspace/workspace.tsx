@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
+  Brain,
   CalendarDays,
   Columns2,
   Copy,
@@ -63,6 +64,7 @@ const ICONS: Record<string, ComponentType<LucideProps>> = {
   concept: Lightbulb,
   assistant: Sparkles,
   speaking: Mic,
+  review: Brain,
 };
 
 export function useWorkspace() {

@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { BACKUP_TABLE_ORDER } from '@mynotes/shared';
+import { BACKUP_TABLE_ORDER, uuidv7 } from '@mynotes/shared';
 import { api, client, setupOwner } from './helpers';
 
 type Http = ReturnType<typeof client>;
@@ -104,6 +104,38 @@ describe('backup', () => {
     const sessions = (await a.get('/study-sessions')).body.data;
     expect(sessions[0].noteIds).toEqual([n1.id]);
     expect(result.body.data.documentsAwaitingFile).toHaveLength(1);
+  });
+
+  it('keeps the review: cards with their schedule, answers, sessions and free recall', async () => {
+    const owner = await setupOwner();
+    const a = client(owner.token);
+    const today = new Date().toISOString().slice(0, 10);
+    const t = (await a.post('/topics', { title: 'Química' })).body.data;
+    const n = (await a.post('/notes', { title: 'Água', topicId: t.id, content: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A água é formada por hidrogênio e oxigênio.' }] }] } })).body.data;
+    const [card] = (await a.post('/review/cards', { kind: 'basic', front: 'Do que é formada a água?', back: 'Hidrogênio e oxigênio', noteId: n.id, sourceQuote: 'formada por hidrogênio e oxigênio' })).body.data;
+    const session = (await a.post('/review/sessions', { id: uuidv7(), mode: 'due', topicIds: [t.id], localDay: today })).body.data;
+    const answered = (await a.post(`/review/cards/${card.id}/answer`, { id: uuidv7(), sessionId: session.id, rating: 3, confidence: 3, localDay: today })).body.data;
+    await a.post(`/review/sessions/${session.id}/finish`, { seconds: 120 });
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "INSERT INTO review_recalls (id, user_id, topic_id, session_id, text, evaluation_json, coverage, local_day, version, created_at, updated_at) VALUES (?, ?, ?, ?, 'tudo que lembro', NULL, 40, ?, 1, ?, ?)",
+    )
+      .bind(uuidv7(), owner.user.id, t.id, session.id, today, now, now)
+      .run();
+    const backup = await exportAll(a);
+    expect(backup.manifest.counts).toMatchObject({ review_cards: 1, review_logs: 1, review_sessions: 1, review_recalls: 1 });
+
+    const uid = owner.user.id;
+    await env.DB.batch(
+      ['review_recalls', 'review_logs', 'review_sessions', 'review_cards', 'study_sessions', 'notes', 'topics'].map((x) => env.DB.prepare(`DELETE FROM ${x} WHERE user_id = ?`).bind(uid)),
+    );
+    expect((await importAll(a, backup, 'merge')).status).toBe(200);
+    const restored = (await a.get(`/review/cards/${card.id}`)).body.data;
+    expect(restored.schedule).toEqual(answered.card.schedule);
+    expect(restored).toMatchObject({ noteId: n.id, topicId: t.id, sourceChanged: false });
+    const summary = (await a.get(`/review/sessions/${session.id}`)).body.data;
+    expect(summary).toMatchObject({ items: 1, firstTry: 1, recalls: [{ coverage: 40 }] });
+    expect((await a.get('/study-sessions')).body.data[0]).toMatchObject({ source: 'review', durationSeconds: 120 });
   });
 
   it('merge does not duplicate and keeps newer local changes', async () => {

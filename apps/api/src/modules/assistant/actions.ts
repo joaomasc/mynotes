@@ -29,6 +29,7 @@ import { getTopicRow, moveTopic, topicSearchText, updateTopic } from '../topics/
 import { markdownToDoc, referencesIn } from '@mynotes/shared';
 import { executeCreateCanvas, executeUpdateCanvas } from './canvas-actions';
 import { executeWriteDailyNote } from './daily-actions';
+import { executeCreateReviewCards } from './review-actions';
 
 /**
  * Writes the assistant can request. Each one has a *plan* (validates ids,
@@ -49,6 +50,7 @@ export const ACTION_TOOLS = [
   'write_daily_note',
   'create_canvas',
   'update_canvas',
+  'create_review_cards',
 ] as const;
 export type ActionTool = (typeof ACTION_TOOLS)[number];
 
@@ -868,6 +870,7 @@ const EXECUTORS: Record<ActionTool, (db: D1Database, userId: string, payload: ne
   write_daily_note: executeWriteDailyNote,
   create_canvas: executeCreateCanvas,
   update_canvas: executeUpdateCanvas,
+  create_review_cards: executeCreateReviewCards,
 };
 
 export function execute(db: D1Database, userId: string, plan: Pick<Plan, 'tool' | 'payload'>): Promise<Execution> {

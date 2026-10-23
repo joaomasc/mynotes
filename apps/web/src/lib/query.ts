@@ -116,4 +116,14 @@ export const qk = {
   speechAttempts: ['speech-attempts'] as const,
   speechAttempt: (id: string) => ['speech-attempt', id] as const,
   speechPath: (today: string) => ['speech-path', today] as const,
+  /** Everything of Revisar starts with 'review': one invalidation refreshes it all. */
+  reviewAll: ['review'] as const,
+  reviewSummary: (today: string) => ['review', 'summary', today] as const,
+  reviewStats: (today: string) => ['review', 'stats', today] as const,
+  reviewScope: (topicIds: string[]) => ['review', 'scope', topicIds] as const,
+  reviewCards: (filters: object) => ['review', 'cards', filters] as const,
+  reviewProposals: (filters: object) => ['review', 'proposals', filters] as const,
+  reviewSessions: ['review', 'sessions'] as const,
+  reviewSession: (id: string) => ['review', 'session', id] as const,
+  reviewRecalls: (topicId: string) => ['review', 'recalls', topicId] as const,
 };

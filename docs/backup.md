@@ -49,6 +49,8 @@ mynotes-backup-AAAA-MM-DD.zip
 - Datas e horários em ISO-8601 UTC; datas de calendário como `AAAA-MM-DD`.
 - Dados de autenticação (usuário, hashes, sessões, tokens) **nunca** são exportados, nem as chaves internas do R2.
 
+**Revisar:** os cartões (com a agenda do FSRS), as respostas, as sessões e as recordações livres entram no backup; as perguntas da IA que ainda esperam aprovação não (são um cache, apagadas depois de 30 dias).
+
 **Oratória:** as falas, a trilha (práticas, progresso, habilidades) e os discursos entram no backup; as **gravações de áudio não** (ficam só no R2 e são apagadas com a fala), nem o cache de exercícios gerados pela IA e as inscrições de notificação, que são do aparelho.
 
 ## Importação

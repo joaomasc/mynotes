@@ -3,6 +3,7 @@ import { Dialog as RDialog } from 'radix-ui';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   BookOpen,
+  Brain,
   CalendarDays,
   ChevronRight,
   Ellipsis,
@@ -49,6 +50,7 @@ import { TopicTree } from '@/features/topics/topic-tree';
 import { TopicFormDialog } from '@/features/topics/topic-dialogs';
 import { useCurrentTopic } from '@/features/topics/use-current-topic';
 import { useCreateNote } from '@/features/notes/use-create-note';
+import { useReviewSummary } from '@/features/review/use-review';
 import { Workspace } from '@/features/workspace/workspace';
 import { CommandPaletteDialog, CommandPaletteProvider, useCommandPalette } from './command-palette';
 import { SyncIndicator } from './sync-indicator';
@@ -65,6 +67,7 @@ const NAV = [
   { to: '/library', label: 'Biblioteca', icon: LibraryBig, also: ['/readings'] },
   { to: '/graph', label: 'Grafo', icon: Waypoints, also: [] },
   { to: '/canvas', label: 'Canvas', icon: LayoutDashboard, also: [] },
+  { to: '/review', label: 'Revisar', icon: Brain, also: [] },
   { to: '/assistant', label: 'Assistente', icon: Sparkles, also: [] },
   { to: '/speaking', label: 'Oratória', icon: Mic, also: [] },
 ];
@@ -117,6 +120,8 @@ function useQuickCreate(): { items: MenuEntry[]; dialog: ReactNode } {
 function NavItems({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const review = useReviewSummary().data;
+  const reviewCount = review ? review.due + review.newAvailable : 0;
   const item = cn(
     'flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-sm transition-colors lg:h-8',
     collapsed && 'justify-center px-0',
@@ -140,7 +145,12 @@ function NavItems({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?:
           }
         >
           <Icon className="size-4 shrink-0" aria-hidden />
-          <span className={cn(collapsed && 'sr-only')}>{label}</span>
+          <span className={cn('min-w-0 flex-1 truncate', collapsed && 'sr-only')}>{label}</span>
+          {to === '/review' && reviewCount > 0 && !collapsed && (
+            <span className="rounded-full bg-accent-soft px-1.5 text-[11px] font-medium text-accent tabular-nums" aria-label={`${reviewCount} para revisar hoje`}>
+              {reviewCount}
+            </span>
+          )}
         </NavLink>
       ))}
       <Menu

@@ -30,6 +30,8 @@ export async function runMaintenance(env: Env): Promise<void> {
     stmt(db, "DELETE FROM import_jobs WHERE status <> 'committed' AND created_at < ?", dayAgo),
     stmt(db, "DELETE FROM import_chunks WHERE job_id IN (SELECT id FROM import_jobs WHERE status = 'committed')"),
     stmt(db, 'DELETE FROM activity_events WHERE occurred_at < ?', isoBefore(400 * 86400)),
+    // Questions written by the AI and never approved nor discarded.
+    stmt(db, 'DELETE FROM review_proposals WHERE created_at < ?', isoBefore(30 * 86400)),
     ...stale.map((d) => stmt(db, 'DELETE FROM documents WHERE id = ? AND uploaded_at IS NULL', d.id)),
   ]);
 
