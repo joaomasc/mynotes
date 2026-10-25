@@ -18,6 +18,7 @@ import {
   type ReviewCard,
   type ReviewCardCreate,
   type ReviewLog,
+  type MemoryTuple,
   type ReviewMode,
   type ReviewQueue,
   type ReviewSettings,
@@ -340,7 +341,7 @@ async function newIntroducedToday(db: D1Database, userId: string, today: string)
 export async function buildQueue(
   db: D1Database,
   userId: string,
-  q: { topicIds?: string[] | undefined; mode: ReviewMode; limit?: number | undefined; today: string },
+  q: { topicIds?: string[] | undefined; noteIds?: string[] | undefined; mode: ReviewMode; limit?: number | undefined; today: string },
 ): Promise<ReviewQueue> {
   const settings = await reviewSettings(db, userId);
   const limit = q.limit ?? settings.sessionSize;
@@ -350,8 +351,9 @@ export async function buildQueue(
 
   const s = scopeOf(userId, q.topicIds);
   const now = nowIso();
-  const base = `c.user_id = ? AND c.status = 'active' AND c.kind IN (${placeholders(kinds.length)}) AND ${CARD_LIVE} AND ${s.has(CARD_TOPIC)}`;
-  const baseBinds: Bindable[] = [userId, ...kinds];
+  const notes = q.noteIds ?? [];
+  const base = `c.user_id = ? AND c.status = 'active' AND c.kind IN (${placeholders(kinds.length)}) AND ${CARD_LIVE} AND ${s.has(CARD_TOPIC)}${notes.length ? ` AND c.note_id IN (${placeholders(notes.length)})` : ''}`;
+  const baseBinds: Bindable[] = [userId, ...kinds, ...notes];
   const counts = await first(
     db,
     `${s.cte}SELECT
@@ -403,6 +405,19 @@ export async function buildQueue(
     newCount: num(counts?.fresh),
     newLeftToday,
   };
+}
+
+/* -------------------------------------------------------------- memory -- */
+
+/** Every active card as the memory graph needs it (see review/memory.ts), oldest first. */
+export async function memoryCards(db: D1Database, userId: string): Promise<MemoryTuple[]> {
+  const rows = await all(
+    db,
+    `SELECT c.note_id, ${CARD_TOPIC} AS topic_id, n.reading_id, c.phase, c.stability, c.last_review, c.due
+       FROM ${CARD_FROM} WHERE c.user_id = ? AND c.status = 'active' AND ${CARD_LIVE} ORDER BY c.created_at LIMIT 20000`,
+    userId,
+  );
+  return rows.map((r) => [strOrNull(r.note_id), strOrNull(r.topic_id), strOrNull(r.reading_id), num(r.phase), num(r.stability), strOrNull(r.last_review), str(r.due)]);
 }
 
 /* -------------------------------------------------------------- answer -- */

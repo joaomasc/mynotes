@@ -29,6 +29,8 @@ export interface FGNode {
   dashed?: boolean;
   /** Tags are drawn smaller and hollow. */
   shape?: 'tag';
+  /** Drawn as a ring (memory graph: items without cards, or never reviewed). */
+  hollow?: boolean;
   /** A root topic: its cluster gathers around it (one cluster per group of connected items). */
   root?: boolean;
 }
@@ -381,10 +383,10 @@ export const ForceGraph = forwardRef<ForceGraphHandle, Props>(function ForceGrap
       const color = e.colors.get(n.data.color);
       ctx.beginPath();
       ctx.arc(n.x ?? 0, n.y ?? 0, r, 0, Math.PI * 2);
-      if (n.data.shape === 'tag') {
+      if (n.data.shape === 'tag' || n.data.hollow) {
         ctx.fillStyle = bg;
         ctx.fill();
-        ctx.lineWidth = 1.5 / Math.max(k, 0.5);
+        ctx.lineWidth = (n.data.hollow ? 2 : 1.5) / Math.max(k, 0.5);
         ctx.strokeStyle = color;
         ctx.stroke();
       } else {

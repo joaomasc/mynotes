@@ -39,10 +39,11 @@ export function useInvalidateReview() {
 export const reviewLink = (topicIds: string[]) => (topicIds.length ? `/review?topics=${topicIds.join(',')}` : '/review');
 
 /** Link that starts a session right away. */
-export function sessionLink(id: string, o: { topicIds: string[]; mode: string; limit?: number; topicId?: string }) {
+export function sessionLink(id: string, o: { topicIds: string[]; mode: string; limit?: number; topicId?: string; noteIds?: string[] }) {
   const q = new URLSearchParams({ mode: o.mode });
   if (o.topicIds.length) q.set('topics', o.topicIds.join(','));
   if (o.limit) q.set('limit', String(o.limit));
   if (o.topicId) q.set('topic', o.topicId);
+  if (o.noteIds?.length) q.set('notes', o.noteIds.join(','));
   return `/review/session/${id}?${q.toString()}`;
 }

@@ -11,6 +11,7 @@ import { Card, Page, PageHeader } from '@/components/ui/layout';
 import { ApiError, errorMessage } from '@/lib/api/client';
 import { endpoints } from '@/lib/api/endpoints';
 import { qk } from '@/lib/query';
+import { LinkSuggestions } from '../links/link-suggestions';
 import { RelationsPanel } from '../shared/relations-panel';
 import { TopicBreadcrumb } from '../shared/topic-breadcrumb';
 import { TopicSelect } from '../topics/topic-dialogs';
@@ -88,6 +89,7 @@ export function Component() {
           <Card className="p-4">
             <RelationsPanel type="concept" id={c.id} title={c.name} />
           </Card>
+          <LinkSuggestions type="concept" id={c.id} boxed />
           <Card className="p-4">
             <h3 className="mb-2 text-[13px] font-semibold text-muted">Mencionado em</h3>
             {back.data?.length ? (

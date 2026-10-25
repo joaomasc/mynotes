@@ -57,6 +57,10 @@ curl https://mynotes-api.<subdomínio>.workers.dev/api/v1/health
 
 A documentação interativa da API fica em `/api/v1/docs` (OpenAPI em `/api/v1/openapi.json`).
 
+### Ligações sugeridas: migração 0011
+
+A migração `0011_link_suggestions.sql` só cria a tabela, dois gatilhos e a coluna `knowledge_index.links_hash`: aplique-a antes de publicar o Worker. O limite de semelhança exibido pode ser ajustado com a variável `LINKS_MIN_SCORE` (padrão 0,62).
+
 ### Revisar: migração 0010
 
 A migração `0010_review.sql` cria as tabelas da Revisão e **recria `study_sessions`** para aceitar sessões de origem "revisão" (o SQLite não altera uma restrição `CHECK`): as linhas e os vínculos com notas e documentos são copiados e devolvidos na mesma migração. Por ter `DROP TABLE` e `ALTER TABLE … RENAME`, o workflow a trata como destrutiva. Antes de aplicar: exporte um backup pelo app e anote o horário (para um eventual *Time Travel*). Depois, como sempre, `npm run db:migrate:remote -w @mynotes/api` e só então `npm run deploy -w @mynotes/api` e o frontend. O lembrete da Revisão usa as mesmas chaves VAPID da Oratória.

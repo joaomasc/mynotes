@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   BACKUP_TABLES,
+  MEMORY_TIER_LABELS,
+  cardRetrievability,
+  memoryByNode,
+  memoryTier,
+  type MemoryCard,
   SETTINGS_SCHEMAS,
   afterAnswer,
   clozeIndices,
@@ -182,5 +187,43 @@ describe('contract', () => {
     expect(order.indexOf('review_logs')).toBeGreaterThan(order.indexOf('review_cards'));
     expect(order.indexOf('review_logs')).toBeGreaterThan(order.indexOf('review_sessions'));
     expect(order.indexOf('review_sessions')).toBeGreaterThan(order.indexOf('study_sessions'));
+  });
+});
+
+describe('memory graph', () => {
+  const at = new Date('2026-10-23T12:00:00.000Z');
+  const day = (n: number) => new Date(at.getTime() - n * 86_400_000).toISOString();
+  const card = (o: Partial<MemoryCard>): MemoryCard => ({ noteId: null, topicId: null, readingId: null, phase: 2, stability: 10, lastReview: day(0), due: day(-10), ...o });
+
+  it('the chance of remembering falls with time and is 90% when the elapsed time equals the stability', () => {
+    expect(cardRetrievability(card({ phase: 0, lastReview: null }), at)).toBeNull();
+    expect(cardRetrievability(card({ lastReview: day(0) }), at)).toBeCloseTo(1, 5);
+    expect(cardRetrievability(card({ lastReview: day(10) }), at)).toBeCloseTo(0.9, 5);
+    expect(cardRetrievability(card({ lastReview: day(60) }), at)!).toBeLessThan(0.75);
+    expect([0.95, 0.85, 0.75, 0.6, 0.2].map(memoryTier)).toEqual([0, 1, 2, 3, 4]);
+    expect(MEMORY_TIER_LABELS).toHaveLength(5);
+  });
+
+  it('adds every card to its note, its book and its topic with all the ancestors', () => {
+    const parent: Record<string, string | null> = { A: null, B: 'A', C: 'B' };
+    const cards = [
+      card({ noteId: 'n1', topicId: 'C', lastReview: day(10) }),
+      card({ noteId: 'n1', topicId: 'C', lastReview: day(0) }),
+      card({ noteId: 'n2', topicId: 'B', readingId: 'r1', phase: 0, lastReview: null, due: day(1) }),
+      card({ noteId: null, topicId: 'A', lastReview: day(0), due: day(1) }),
+    ];
+    const m = memoryByNode(cards, (id) => parent[id], at);
+    expect(m.get('note:n1')).toMatchObject({ cards: 2, reviewed: 2, due: 0 });
+    expect(m.get('note:n1')!.r).toBeCloseTo(0.95, 2);
+    expect(m.get('note:n2')).toMatchObject({ cards: 1, reviewed: 0, r: null });
+    expect(m.get('reading:r1')).toMatchObject({ cards: 1, reviewed: 0 });
+    expect(m.get('topic:C')).toMatchObject({ cards: 2 });
+    expect(m.get('topic:B')).toMatchObject({ cards: 3, reviewed: 2 });
+    expect(m.get('topic:A')).toMatchObject({ cards: 4, reviewed: 3, due: 1 });
+    expect(m.has('topic:D')).toBe(false);
+  });
+
+  it('keeps the suggested links in the backup', () => {
+    expect(Object.keys(BACKUP_TABLES)).toContain('link_suggestions');
   });
 });

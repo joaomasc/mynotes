@@ -37,4 +37,6 @@ export * from './review/cloze';
 export * from './review/answers';
 export * from './review/schedule';
 export * from './review/queue';
+export * from './review/memory';
+export * from './schemas/links';
 export * from './schemas/review';

@@ -76,6 +76,11 @@ export class FakeVectorize {
       .slice(0, opts.topK ?? 5);
     return { matches, count: matches.length };
   }
+  async queryById(id: string, opts: { topK?: number; namespace?: string } = {}) {
+    this.check();
+    const v = this.vectors.get(`${opts.namespace ?? ''}|${id}`);
+    return v ? this.query(v.values, opts) : { matches: [], count: 0 };
+  }
   /** Vector ids of one user. */
   idsOf(namespace: string): string[] {
     return [...this.vectors.values()].filter((v) => v.namespace === namespace).map((v) => v.id).sort();

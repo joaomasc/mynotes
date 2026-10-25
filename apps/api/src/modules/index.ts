@@ -3,6 +3,7 @@ import { assistantRoutes } from './assistant/routes';
 import { backupRoutes } from './backup/routes';
 import { documentRoutes } from './documents/routes';
 import { knowledgeRoutes } from './knowledge/routes';
+import { linkRoutes } from './links/routes';
 import { noteRoutes } from './notes/routes';
 import { overviewRoutes } from './overview/routes';
 import { planRoutes } from './plans/routes';
@@ -32,4 +33,5 @@ export const routeModules: RouteModule[] = [
   assistantRoutes,
   speechRoutes,
   reviewRoutes,
+  linkRoutes,
 ];

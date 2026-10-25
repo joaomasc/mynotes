@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Search,
   Settings2,
+  Sparkles,
   Trash,
   Waypoints,
   X,
@@ -28,11 +29,13 @@ import { endpoints } from '@/lib/api/endpoints';
 import { cn } from '@/lib/cn';
 import { ENTITY_CSS_VAR, EntityIcon, entityLabel } from '@/lib/entities';
 import { qk } from '@/lib/query';
+import { SuggestionCard, useAutoExplain } from '../links/link-suggestions';
 import { hoverPreview } from '../preview/hover-preview';
 import { RelationDialog } from '../shared/relation-dialog';
 import { useTopics } from '../topics/use-topics';
 import { openModeOf, openPath } from '../workspace/store';
 import { ForceGraph, type ForceGraphHandle } from './force-graph';
+import { FadingList, MemoryLegend, NodeMemory, useGraphMemory, type MemoryDays } from './memory-overlay';
 import {
   DEFAULT_GRAPH_PREFS,
   GROUP_COLORS,
@@ -160,11 +163,21 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Timeline: how many items (oldest first) are shown while it plays.
   const [revealed, setRevealed] = useState<number | null>(null);
+  // Memory graph: colors by how much is remembered, today or some days ahead.
+  const memoryMode = prefs.colorBy === 'memory';
+  const [memDays, setMemDays] = useState<MemoryDays>('0');
+  const { memory, cards: memCards } = useGraphMemory(memoryMode, memDays, tree);
+  // Suggested links as dashed lines.
+  const suggestionsQuery = useQuery({ queryKey: qk.linksGraph, queryFn: () => endpoints.links.all(), enabled: prefs.showSuggestions });
+  const suggestions = useMemo(() => (prefs.showSuggestions ? (suggestionsQuery.data?.suggestions ?? []) : []), [prefs.showSuggestions, suggestionsQuery.data]);
+  const [suggestionId, setSuggestionId] = useState<string | null>(null);
+  const suggestion = suggestionId ? suggestions.find((x) => x.id === suggestionId) : undefined;
+  const explaining = useAutoExplain(suggestion ? [suggestion] : undefined);
 
   const ctx = useMemo(() => ({ tree, tagsByNote: tagsByNote(graph) }), [tree, graph]);
   const view = useMemo(
-    () => buildView(graph, { structure, hidden, showOrphans: prefs.showOrphans, showTags: prefs.showTags, groups: prefs.groups, ctx }),
-    [graph, structure, hidden, prefs.showOrphans, prefs.showTags, prefs.groups, ctx],
+    () => buildView(graph, { structure, hidden, showOrphans: prefs.showOrphans, showTags: prefs.showTags, groups: prefs.groups, ctx, memory, suggestions }),
+    [graph, structure, hidden, prefs.showOrphans, prefs.showTags, prefs.groups, ctx, memory, suggestions],
   );
 
   const focusSet = useMemo(() => {
@@ -276,7 +289,15 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
           if (n && rect && !key!.startsWith('tag:')) hoverPreview.show(graphNodePath(n), rect, 650);
           else hoverPreview.hide();
         }}
-        onEdgeClick={(key) => setSelectedEdge(view.edgeSource.get(key) ?? null)}
+        onEdgeClick={(key) => {
+          if (key.startsWith('sug:')) {
+            setSelectedEdge(null);
+            setSuggestionId(key.slice(4));
+          } else {
+            setSuggestionId(null);
+            setSelectedEdge(view.edgeSource.get(key) ?? null);
+          }
+        }}
         onConnect={(a, b) => {
           const source = view.source.get(a);
           const target = view.source.get(b);
@@ -324,6 +345,28 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
         >
           {connectMode ? 'Conectando…' : 'Conectar'}
         </Button>
+        <Segmented
+          label="Cor dos itens"
+          size="sm"
+          value={prefs.colorBy}
+          onChange={(v) => setPrefs({ ...prefs, colorBy: v })}
+          options={[
+            { value: 'type', label: 'Tipos', title: 'Cor pelo tipo de item' },
+            { value: 'memory', label: 'Memória', title: 'Cor pelo quanto você lembra de cada item (cartões da Revisar)' },
+          ]}
+        />
+        <Button
+          size="sm"
+          variant={prefs.showSuggestions ? 'primary' : 'outline'}
+          icon={<Sparkles className="size-3.5" />}
+          onClick={() => {
+            setSuggestionId(null);
+            setPrefs({ ...prefs, showSuggestions: !prefs.showSuggestions });
+          }}
+          title="Notas e conceitos parecidos no sentido que ainda não estão ligados"
+        >
+          Sugestões{prefs.showSuggestions && suggestionsQuery.data ? ` (${view.edges.filter((e) => e.key.startsWith('sug:')).length})` : ''}
+        </Button>
         <IconButton label="Enquadrar tudo (0)" size="sm" variant="outline" onClick={() => fg.current?.fit()}>
           <Maximize className="size-4" />
         </IconButton>
@@ -346,8 +389,23 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
         </p>
       )}
 
+      {memoryMode && memory && !settingsOpen && (
+        <FadingList
+          nodes={shown.nodes.flatMap((n) => view.source.get(n.key) ?? [])}
+          memory={memory}
+          onPick={(key) => {
+            setSuggestionId(null);
+            setSelectedEdge(null);
+            setSelected(key);
+            fg.current?.centerOn(key, 1.4);
+          }}
+        />
+      )}
+
       {settingsOpen ? (
         <SettingsPanel prefs={prefs} onChange={setPrefs} onClose={() => setSettingsOpen(false)} onReset={() => setPrefs(DEFAULT_GRAPH_PREFS)} />
+      ) : memoryMode ? (
+        <MemoryLegend days={memDays} onDays={setMemDays} suggestions={prefs.showSuggestions} />
       ) : (
         <div className="absolute right-3 bottom-3 hidden rounded-xl border border-border bg-surface/95 p-3 text-xs shadow-card sm:block" aria-label="Legenda">
           <p className="mb-1.5 font-medium">Legenda</p>
@@ -372,6 +430,11 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
             <li className="flex items-center gap-2">
               <span className="h-0.5 w-5 bg-note" aria-hidden /> Referência numa nota
             </li>
+            {prefs.showSuggestions && (
+              <li className="flex items-center gap-2">
+                <span className="w-5 border-t-2 border-dashed" style={{ borderColor: 'var(--suggest)' }} aria-hidden /> Ligação sugerida
+              </li>
+            )}
             {structure && (
               <li className="flex items-center gap-2">
                 <span className="w-5 border-t border-dashed border-border-strong" aria-hidden /> Hierarquia
@@ -380,6 +443,20 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
           </ul>
           <p className="mt-2 text-[11px] text-subtle">Duplo clique abre · Ctrl+clique abre em nova aba</p>
         </div>
+      )}
+
+      {suggestion && (
+        <aside className="absolute top-14 left-3 w-80 max-w-[calc(100%-1.5rem)] rounded-xl border border-border bg-surface p-4 shadow-pop" aria-label="Ligação sugerida">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-xs text-subtle">
+              <Sparkles className="size-3.5" aria-hidden /> Ligação sugerida
+            </p>
+            <IconButton label="Fechar" size="sm" onClick={() => setSuggestionId(null)}>
+              <X className="size-4" />
+            </IconButton>
+          </div>
+          <SuggestionCard s={suggestion} explaining={explaining && !suggestion.explained} onDone={() => setSuggestionId(null)} />
+        </aside>
       )}
 
       {selectedEdge && (
@@ -398,7 +475,7 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
         </aside>
       )}
 
-      {sel && !selectedEdge && (
+      {sel && !selectedEdge && !suggestion && (
         <aside className="absolute top-14 left-3 w-72 max-w-[calc(100%-1.5rem)] rounded-xl border border-border bg-surface p-4 shadow-pop" aria-label="Item selecionado">
           <div className="flex items-start gap-2">
             <EntityIcon type={sel.type} />
@@ -425,6 +502,7 @@ function GraphView({ graph, structure, focus, hidden }: { graph: Graph; structur
               <Expand className="size-3.5" aria-hidden /> Expandir vizinhos
             </button>
           </div>
+          {memoryMode && memory && !sel.key.startsWith('tag:') && <NodeMemory node={sel} memory={memory} cards={memCards} />}
           <div className="scrollbar-thin mt-3 max-h-64 space-y-3 overflow-y-auto border-t border-border pt-3">
             {outgoing.length > 0 && (
               <div>

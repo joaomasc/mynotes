@@ -65,6 +65,11 @@ import type {
   SpeechProjectCreate,
   SpeechProjectUpdate,
   PushStatus,
+  LinkAccept,
+  LinkSuggestion,
+  LinkSuggestionsResult,
+  LinkableType,
+  ReviewMemory,
   ReviewAnswer,
   ReviewAnswerResult,
   ReviewCard,
@@ -319,8 +324,16 @@ export const endpoints = {
     stats: (today: string, tzOffset: number) => api.get<ReviewStats>('/review/stats', { today, tzOffset }),
     /** `topicIds`: each one with all its descendants; empty = everything. */
     scope: (topicIds: string[], today: string) => api.get<ReviewScopeInfo>('/review/scope', { today, topicIds: topicIds.join(',') || undefined }),
-    queue: (q: { topicIds: string[]; mode: string; today: string; limit?: number }) =>
-      api.get<ReviewQueue>('/review/queue', { mode: q.mode, today: q.today, limit: q.limit, topicIds: q.topicIds.join(',') || undefined }),
+    queue: (q: { topicIds: string[]; noteIds?: string[]; mode: string; today: string; limit?: number }) =>
+      api.get<ReviewQueue>('/review/queue', {
+        mode: q.mode,
+        today: q.today,
+        limit: q.limit,
+        topicIds: q.topicIds.join(',') || undefined,
+        noteIds: q.noteIds?.join(',') || undefined,
+      }),
+    /** Every active card's FSRS state, for the memory graph. */
+    memory: () => api.get<ReviewMemory>('/review/memory'),
     cards: (q: { topicIds?: string[]; noteId?: string; kind?: string; status?: string; q?: string; cursor?: string; limit?: number }) =>
       api.page<ReviewCard>('/review/cards', { ...q, topicIds: q.topicIds?.join(',') || undefined }),
     card: (id: string) => api.get<ReviewCard>(`/review/cards/${id}`),
@@ -342,6 +355,18 @@ export const endpoints = {
     finishSession: (id: string, seconds: number) => api.post<ReviewSessionSummary>(`/review/sessions/${id}/finish`, { seconds }),
     recall: (body: ReviewRecallCreate) => api.post<ReviewRecall>('/review/recalls', body, { retries: 0, track: false }),
     recalls: (topicId?: string) => api.get<ReviewRecall[]>('/review/recalls', { topicId }),
+  },
+
+  links: {
+    /** Suggestions of one note or concept (searched on the spot when its text changed). */
+    forItem: (type: LinkableType, id: string) => api.get<LinkSuggestionsResult>('/links/suggestions', { type, id }),
+    /** Open suggestions of everything (graph). */
+    all: (limit = 300) => api.get<LinkSuggestionsResult>('/links/suggestions', { limit }),
+    /** The AI explains them (once per pair). */
+    explain: (ids: string[]) => api.post<LinkSuggestion[]>('/links/suggestions/explain', { ids }, { retries: 0, track: false }),
+    accept: (id: string, body: LinkAccept = {}) => api.post<{ relation: RelationWithTitles }>(`/links/suggestions/${id}/accept`, body),
+    dismiss: (id: string) => api.post(`/links/suggestions/${id}/dismiss`, {}),
+    scan: () => api.post<{ scanned: number; found: number; more: boolean }>('/links/scan', {}, { retries: 0, track: false }),
   },
 
   transcriptions: {

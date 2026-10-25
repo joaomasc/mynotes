@@ -41,8 +41,9 @@ export function Component() {
   const [params] = useSearchParams();
   const mode = params.get('mode') as ReviewMode | null;
   const topicIds = (params.get('topics') ?? '').split(',').filter(Boolean);
+  const noteIds = (params.get('notes') ?? '').split(',').filter(Boolean);
   if (!mode || !REVIEW_MODES.includes(mode)) return <PastSession id={id} />;
-  return <LiveSession key={id} id={id} mode={mode} topicIds={topicIds} limit={Number(params.get('limit')) || undefined} recallTopic={params.get('topic')} />;
+  return <LiveSession key={id} id={id} mode={mode} topicIds={topicIds} noteIds={noteIds} limit={Number(params.get('limit')) || undefined} recallTopic={params.get('topic')} />;
 }
 
 /** A session opened from the history: its summary. */
@@ -57,7 +58,7 @@ function PastSession({ id }: { id: string }) {
   );
 }
 
-function LiveSession({ id, mode, topicIds, limit, recallTopic }: { id: string; mode: ReviewMode; topicIds: string[]; limit: number | undefined; recallTopic: string | null }) {
+function LiveSession({ id, mode, topicIds, noteIds, limit, recallTopic }: { id: string; mode: ReviewMode; topicIds: string[]; noteIds: string[]; limit: number | undefined; recallTopic: string | null }) {
   const { settings, isLoading: settingsLoading } = useReviewSettings();
   const { tree } = useTopics();
   const invalidate = useInvalidateReview();
@@ -93,7 +94,7 @@ function LiveSession({ id, mode, topicIds, limit, recallTopic }: { id: string; m
           setQueue([]);
           return;
         }
-        const q = await endpoints.review.queue({ topicIds, mode, today: todayIso(), limit: limit ?? settings.sessionSize });
+        const q = await endpoints.review.queue({ topicIds, noteIds, mode, today: todayIso(), limit: limit ?? settings.sessionSize });
         setCards(new Map(q.cards.map((c) => [c.id, c])));
         setQueue(q.cards.map((c) => ({ cardId: c.id, round: 0 })));
         setTotal(q.cards.length);
@@ -110,7 +111,7 @@ function LiveSession({ id, mode, topicIds, limit, recallTopic }: { id: string; m
         setError(err);
       }
     })();
-  }, [id, mode, topicIds, limit, settings.sessionSize, settingsLoading]);
+  }, [id, mode, topicIds, noteIds, limit, settings.sessionSize, settingsLoading]);
 
   const finish = async () => {
     setFinishing(true);

@@ -130,12 +130,14 @@ export const zReviewCardUpdate = z.object({
 });
 export type ReviewCardUpdate = z.input<typeof zReviewCardUpdate>;
 
-/** Comma-separated topic ids (each one with its descendants). */
-export const zTopicIdList = z
+/** Comma-separated ids (up to 50). */
+export const zIdList = z
   .string()
   .max(50 * 37)
   .transform((s) => [...new Set(s.split(',').map((x) => x.trim()).filter(Boolean))])
   .pipe(z.array(zId).max(50));
+/** Comma-separated topic ids (each one with its descendants). */
+export const zTopicIdList = zIdList;
 
 export const zReviewCardListQuery = z.object({
   topicIds: zTopicIdList.optional(),
@@ -147,6 +149,8 @@ export const zReviewCardListQuery = z.object({
 
 export const zReviewQueueQuery = z.object({
   topicIds: zTopicIdList.optional(),
+  /** Only the cards of these notes ("Revisar agora" from the memory graph). */
+  noteIds: zIdList.optional(),
   mode: z.enum(REVIEW_MODES).default('due'),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   /** Local date (new items per day count local days). */
@@ -407,6 +411,14 @@ export type ReviewHelp = z.infer<typeof zReviewHelp>;
 export const zReviewVariantsRequest = z.object({ cardIds: z.array(zId).min(1).max(20) });
 export const zReviewVariants = z.object({ variants: z.array(z.object({ cardId: zId, prompt: z.string() })) });
 export type ReviewVariants = z.infer<typeof zReviewVariants>;
+
+/* -------------------------------------------------------------- memory -- */
+
+/** Cards as [noteId, topicId, readingId, phase, stability, lastReview, due] (see review/memory.ts). */
+export const zReviewMemory = z.object({
+  cards: z.array(z.tuple([zId.nullable(), zId.nullable(), zId.nullable(), z.number().int(), z.number(), zDateTime.nullable(), zDateTime])),
+});
+export type ReviewMemory = z.infer<typeof zReviewMemory>;
 
 /* --------------------------------------------------------------- stats -- */
 

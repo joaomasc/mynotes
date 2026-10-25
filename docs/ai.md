@@ -177,7 +177,9 @@ As migrações `0003` e `0004` são aditivas: criam `ai_conversations`, `ai_mess
 
 O custo é calculado com os tokens que a própria API informa em cada resposta e os preços configurados. Referência medida em testes reais com `gpt-6-luna`, com pré-busca e streaming: **~US$ 0,0002 a 0,0005 por mensagem** (~4 mil tokens de entrada, boa parte em cache; ~100 de saída), **primeiro texto em ~2 s e resposta completa em ~3 s** quando a pré-busca basta (antes eram 5,5–6,8 s, com tudo aparecendo no fim). Os embeddings (`bge-m3`, US$ 0,0118 por 1M tokens) saem da cota diária gratuita do Workers AI, a mesma do ditado. Com US$ 5, são milhares de mensagens. O orçamento diário padrão (US$ 0,50) é checado antes de cada mensagem e entre as chamadas ao modelo, e pode ser ultrapassado por no máximo uma chamada.
 
-A **Revisar** ([revisar.md](revisar.md#custos)) usa a mesma chave, o mesmo modelo e o mesmo orçamento: gerar perguntas (~US$ 0,002 por lote), corrigir dissertações (~US$ 0,001 cada), recordação livre, perguntas reformuladas e ajuda para cartões difíceis. Os logs têm uma linha `{"msg":"review <chamada>", input_tokens, output_tokens, cost_usd, ms}` por chamada.
+As **ligações sugeridas** ([grafo-memoria.md](grafo-memoria.md)) usam a IA só para explicar os pares exibidos: cerca de US$ 0,0003 por lote de 10, uma vez por par.
+
+A **Revisar** ([revisar.md](revisar.md#custos)) usa a mesma chave, o mesmo modelo e o mesmo orçamento: gerar perguntas (~US$ 0,002 por lote), corrigir dissertações (~US$ 0,001 cada), recordação livre, perguntas reformuladas e ajuda para cartões difíceis. Os logs têm uma linha `{"msg":"ai review_<chamada>", input_tokens, output_tokens, cost_usd, ms}` por chamada.
 
 ## Testes
 

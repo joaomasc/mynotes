@@ -126,4 +126,9 @@ export const qk = {
   reviewSessions: ['review', 'sessions'] as const,
   reviewSession: (id: string) => ['review', 'session', id] as const,
   reviewRecalls: (topicId: string) => ['review', 'recalls', topicId] as const,
+  reviewMemory: ['review', 'memory'] as const,
+  /** Suggested links: ['links'] refreshes them all. */
+  linksAll: ['links'] as const,
+  links: (type: string, id: string) => ['links', type, id] as const,
+  linksGraph: ['links', 'graph'] as const,
 };

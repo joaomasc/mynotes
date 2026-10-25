@@ -1,5 +1,16 @@
 import { useMemo } from 'react';
-import { RELATION_KIND_LABELS, normalizeSearch, type Graph, type GraphEdge, type GraphEntityType, type GraphNode, type RelationKind } from '@mynotes/shared';
+import {
+  RELATION_KIND_LABELS,
+  memoryTier,
+  normalizeSearch,
+  type Graph,
+  type GraphEdge,
+  type GraphEntityType,
+  type GraphNode,
+  type LinkSuggestion,
+  type MemoryInfo,
+  type RelationKind,
+} from '@mynotes/shared';
 import { ENTITY_CSS_VAR } from '@/lib/entities';
 import { usePref } from '@/lib/prefs';
 import { referencePath } from '@/lib/references';
@@ -17,9 +28,24 @@ export interface GraphPrefs extends GraphSettings {
   showOrphans: boolean;
   showTags: boolean;
   groups: ColorGroup[];
+  /** Nodes colored by type, or by how much the user remembers them (memory graph). */
+  colorBy: 'type' | 'memory';
+  /** Suggested links drawn as dashed lines. */
+  showSuggestions: boolean;
 }
 
-export const DEFAULT_GRAPH_PREFS: GraphPrefs = { ...DEFAULT_FORCES, showOrphans: true, showTags: false, groups: [] };
+export const DEFAULT_GRAPH_PREFS: GraphPrefs = { ...DEFAULT_FORCES, showOrphans: true, showTags: false, groups: [], colorBy: 'type', showSuggestions: false };
+
+/**
+ * Memory graph colors: one hue from strong (remembers well) to faint; a ring
+ * for items with cards never reviewed, a gray ring for items without cards.
+ */
+export function memoryStyle(key: string, memory: Map<string, MemoryInfo>): { color: string; hollow: boolean } {
+  const info = memory.get(key);
+  if (!info) return { color: 'var(--border-strong)', hollow: true };
+  if (info.r === null) return { color: 'var(--mem-2)', hollow: true };
+  return { color: `var(--mem-${memoryTier(info.r)})`, hollow: false };
+}
 
 export function useGraphPrefs(key = 'mynotes:graph-settings'): [GraphPrefs, (p: GraphPrefs) => void] {
   const [value, set] = usePref<Partial<GraphPrefs>>(key, DEFAULT_GRAPH_PREFS);
@@ -113,6 +139,10 @@ export interface ViewOptions {
   showTags: boolean;
   groups: ColorGroup[];
   ctx: MatchContext;
+  /** Memory graph: node colors by how much the user remembers (null: colors by type). */
+  memory?: Map<string, MemoryInfo> | null;
+  /** Suggested links drawn as dashed lines (key `sug:<id>`). */
+  suggestions?: LinkSuggestion[];
 }
 
 /** Nodes and edges to draw, with filters, tags as nodes and group colors applied. */
@@ -137,6 +167,11 @@ export function buildView(graph: Graph, o: ViewOptions): { nodes: FGNode[]; edge
       for (const id of linked) edges.push({ key: `tag|${t.tag}|${id}`, source: `note:${id}`, target: key, color: 'var(--accent)', width: 0.8, dash: [1, 3] });
     }
   }
+  for (const s of o.suggestions ?? []) {
+    const a = `${s.a.type}:${s.a.id}`;
+    const b = `${s.b.type}:${s.b.id}`;
+    if (source.has(a) && source.has(b)) edges.push({ key: `sug:${s.id}`, source: a, target: b, color: 'var(--suggest)', width: 1.6, dash: [5, 4] });
+  }
   const degree = new Map<string, number>();
   for (const e of edges) {
     degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
@@ -145,12 +180,14 @@ export function buildView(graph: Graph, o: ViewOptions): { nodes: FGNode[]; edge
   for (const n of source.values()) {
     if (!o.showOrphans && !degree.get(n.key)) continue;
     const isTag = n.key.startsWith('tag:');
-    const group = isTag ? undefined : o.groups.find((g) => matchesQuery(g.query, n, o.ctx));
+    const group = isTag || o.memory ? undefined : o.groups.find((g) => matchesQuery(g.query, n, o.ctx));
+    const mem = o.memory && !isTag ? memoryStyle(n.key, o.memory) : null;
     nodes.push({
       key: n.key,
       label: n.label,
-      color: isTag ? 'var(--accent)' : (group?.color ?? nodeColor(n)),
-      dashed: isBookNote(n),
+      color: isTag ? 'var(--accent)' : (mem?.color ?? group?.color ?? nodeColor(n)),
+      hollow: mem?.hollow,
+      dashed: !mem && isBookNote(n),
       shape: isTag ? 'tag' : undefined,
       // Top of the hierarchy shown (a topic whose parent is not in the graph): clusters are centered on it.
       root: n.type === 'topic' && !isTag && !(n.topicId && source.has(`topic:${n.topicId}`)),

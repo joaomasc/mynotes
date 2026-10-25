@@ -15,6 +15,7 @@ import {
   zReviewGenerate,
   zReviewGenerateResult,
   zReviewHelp,
+  zReviewMemory,
   zReviewProposal,
   zReviewProposalDecision,
   zReviewProposalDecisionResult,
@@ -59,6 +60,19 @@ export function reviewRoutes(app: ApiApp) {
       responses: { 200: ok(zReviewSummary), ...errors },
     }),
     async (c) => c.json({ data: await reviewSummary(c.env.DB, c.get('userId'), c.req.valid('query').today) }, 200),
+  );
+
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/review/memory',
+      tags,
+      summary: 'Grafo da memória: o estado do FSRS de cada cartão ativo (nota, assunto, livro)',
+      description: 'Cada cartão é uma tupla [noteId, topicId, readingId, fase, estabilidade, última revisão, vencimento]; o app calcula a chance de lembrar em qualquer dia.',
+      security: secured,
+      responses: { 200: ok(zReviewMemory), ...errors },
+    }),
+    async (c) => c.json({ data: { cards: await cards.memoryCards(c.env.DB, c.get('userId')) } }, 200),
   );
 
   app.openapi(

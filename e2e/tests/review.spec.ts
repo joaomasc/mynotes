@@ -1,5 +1,5 @@
-import { expect, test, type APIRequestContext, type Page, type Route } from '@playwright/test';
-import { API, USER, login } from './helpers';
+import { expect, test, type Page, type Route } from '@playwright/test';
+import { apiAs, login } from './helpers';
 
 /**
  * Revisar end to end, against the real API: the selection of topics (a topic
@@ -9,28 +9,6 @@ import { API, USER, login } from './helpers';
  */
 
 test.beforeEach(async ({ page }) => login(page));
-
-/** A second device logged in through the API, to prepare data quickly. */
-async function apiAs(request: APIRequestContext) {
-  const { argon2id } = await import('hash-wasm');
-  const pre = await (await request.post(`${API}/auth/prelogin`, { data: { username: USER.username } })).json();
-  const k = pre.data.kdf;
-  const key = await argon2id({ password: USER.password, salt: Buffer.from(k.salt, 'base64url'), iterations: k.iterations, parallelism: k.parallelism, memorySize: k.memoryKiB, hashLength: 32, outputType: 'binary' });
-  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
-  const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
-  const auth = await (
-    await request.post(`${API}/auth/login`, {
-      data: { username: USER.username, verifier: Buffer.from(key).toString('base64url'), publicKey: { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y }, deviceLabel: 'Revisar E2E' },
-    })
-  ).json();
-  const headers = { Authorization: `Bearer ${auth.data.accessToken}` };
-  const post = async (path: string, data: unknown) => {
-    const res = await request.post(`${API}${path}`, { headers, data });
-    expect(res.ok(), await res.text()).toBeTruthy();
-    return (await res.json()).data;
-  };
-  return { post, get: async (path: string) => (await (await request.get(`${API}${path}`, { headers })).json()).data };
-}
 
 const paragraphs = (...lines: string[]) => ({ type: 'doc', content: lines.map((t) => ({ type: 'paragraph', content: [{ type: 'text', text: t }] })) });
 const json = (route: Route, data: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });

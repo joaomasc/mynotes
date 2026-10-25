@@ -430,6 +430,26 @@ export const BACKUP_TABLES = {
       ...versioned,
     }),
   },
+  // Suggested links (schema 0011): kept so that dismissed pairs are not suggested again after a restore.
+  link_suggestions: {
+    hasUserId: true,
+    mergeByUpdatedAt: true,
+    row: z.object({
+      id: zId,
+      a_type: z.enum(['note', 'concept']),
+      a_id: zId,
+      b_type: z.enum(['note', 'concept']),
+      b_id: zId,
+      score: z.number(),
+      status: z.enum(['open', 'accepted', 'dismissed']),
+      kind: z.enum(['related', 'references', 'depends_on', 'part_of', 'supports', 'contrasts', 'example_of']).nullable(),
+      direction: z.enum(['ab', 'ba']),
+      reason: str(2000),
+      hidden: int.min(0).max(1),
+      explained_at: ts.nullable(),
+      ...versioned,
+    }),
+  },
   settings: {
     hasUserId: true,
     mergeByUpdatedAt: true,

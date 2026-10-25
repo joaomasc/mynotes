@@ -35,6 +35,7 @@ import { qk } from '@/lib/query';
 import { referencePath } from '@/lib/references';
 import { notesSync, type NoteDraft, type SaveState } from '@/lib/sync/notes-sync';
 import { CanvasList, useCreateCanvas } from '../canvas/use-canvases';
+import { LinkSuggestions } from '../links/link-suggestions';
 import { CardDialog, type CardDraft } from '../review/card-dialog';
 import { GenerateDialog } from '../review/generate-dialog';
 import { DailyNav } from '../daily/daily-nav';
@@ -221,6 +222,7 @@ function NoteInfo({ note }: { note: Note }) {
         </div>
       )}
       <RelationsPanel type="note" id={note.id} title={note.title} />
+      <LinkSuggestions type="note" id={note.id} />
       <div>
         <h3 className="mb-2 text-[13px] font-semibold text-muted">Canvas desta nota</h3>
         <CanvasList noteId={note.id} title={note.title} compact />

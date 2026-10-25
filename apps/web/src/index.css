@@ -39,6 +39,15 @@
   --c-document: #a3532a;
   --c-reading: #7a4fa0;
   --c-concept: #8a7a12;
+
+  /* Memory graph: one hue, strongest (remembers 90%+) to faintest (below 50%); validated ordinal ramp */
+  --mem-0: #0a4f4c;
+  --mem-1: #0f6e6a;
+  --mem-2: #1f8a82;
+  --mem-3: #3f9d95;
+  --mem-4: #6bb8b1;
+  /* Suggested links in the graph */
+  --suggest: #b0467f;
 }
 
 .dark {
@@ -70,6 +79,13 @@
   --c-document: #e0916a;
   --c-reading: #b994dc;
   --c-concept: #d4c25a;
+
+  --mem-0: #8fe0d6;
+  --mem-1: #5cc6bc;
+  --mem-2: #3aa89f;
+  --mem-3: #2a8a83;
+  --mem-4: #1f6b66;
+  --suggest: #e48ab9;
 }
 
 @theme inline {

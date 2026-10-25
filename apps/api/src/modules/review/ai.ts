@@ -33,9 +33,7 @@ import {
 import { ApiError, badRequest, notFound } from '../../lib/errors';
 import { all, first, num, parseJson, placeholders, str, strOrNull, stmt, type Bindable, type Row } from '../../lib/db';
 import { nowIso } from '../../lib/time';
-import { aiConfig, costOf, requireReady } from '../assistant/config';
-import { createResponse, outputText } from '../assistant/openai';
-import { assertWithinBudget, usageStatement } from '../assistant/usage';
+import { askStructured as ask } from '../assistant/structured';
 import { expandCards, getCard, getCards, insertCardStmt, type NewCard } from './cards';
 import {
   EVALUATE_INSTRUCTIONS,
@@ -50,41 +48,6 @@ import {
   generateSchema,
 } from './prompt';
 import { NOTE_FROM, NOTE_LIVE, NOTE_TOPIC, scopeOf } from './scope';
-
-/* -------------------------------------------------------------- model -- */
-
-/**
- * One structured call to the model: checks the daily budget, records what
- * it cost (paid for even when the answer is unusable) and parses the JSON.
- */
-async function ask<T>(
-  env: Env,
-  userId: string,
-  call: { name: string; instructions: string; message: string; schema: Record<string, unknown>; parse: z.ZodType<T>; maxOutputTokens: number; failure: string },
-): Promise<{ value: T; model: string }> {
-  const cfg = requireReady(aiConfig(env));
-  const today = nowIso().slice(0, 10);
-  await assertWithinBudget(env.DB, userId, cfg, today);
-  const started = Date.now();
-  const res = await createResponse(cfg, {
-    instructions: call.instructions,
-    input: [{ role: 'user', content: call.message }],
-    tools: [],
-    toolChoice: 'none',
-    textFormat: { name: call.name, schema: call.schema },
-    maxOutputTokens: Math.max(cfg.maxOutputTokens, call.maxOutputTokens),
-  });
-  const cost = costOf(res.usage, cfg.prices);
-  await usageStatement(env.DB, userId, today, res.usage, cost, 1).run();
-  console.info(JSON.stringify({ level: 'info', msg: `review ${call.name}`, input_tokens: res.usage.inputTokens, output_tokens: res.usage.outputTokens, cost_usd: cost, ms: Date.now() - started }));
-  try {
-    if (res.status !== 'completed') throw new Error(res.incompleteReason ?? res.status);
-    return { value: call.parse.parse(JSON.parse(outputText(res.output))), model: cfg.model };
-  } catch (err) {
-    console.error(JSON.stringify({ level: 'error', msg: `review ${call.name} unusable`, status: res.status, error: String(err).slice(0, 200) }));
-    throw new ApiError('service_unavailable', call.failure);
-  }
-}
 
 const cut = (s: string, max: number) => s.trim().slice(0, max);
 
