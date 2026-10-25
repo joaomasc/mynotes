@@ -29,8 +29,17 @@ import { createRelation } from '../knowledge/service';
 
 /** Pairs below this similarity are not even stored. */
 const STORE_MIN_SCORE = 0.5;
-/** Shown from this similarity on (LINKS_MIN_SCORE overrides it, calibrated on real notes). */
+/**
+ * Shown in the graph from this similarity on (LINKS_MIN_SCORE overrides it).
+ * Calibrated on the real notes (2026-10-25): from 0.62 most pairs are good;
+ * between 0.58 and 0.61 good pairs and noise are mixed.
+ */
 const SHOW_MIN_SCORE = 0.62;
+/**
+ * A note's panel goes lower: there every suggestion is explained by the AI,
+ * which hides the pairs without a real connection.
+ */
+const PANEL_MIN_SCORE = 0.58;
 /** New suggestions kept per item scanned. */
 const KEEP_PER_ITEM = 5;
 /** Chunks of an item whose neighbours are searched (its beginning). */
@@ -230,7 +239,8 @@ function toSuggestion(r: Row): LinkSuggestion {
 
 async function suggestionRows(env: Env, userId: string, q: { item?: Item | undefined; ids?: string[] | undefined; limit: number }): Promise<LinkSuggestion[]> {
   let where = `s.user_id = ? AND s.status = 'open' AND s.hidden = 0 AND s.score >= ? AND ${LIVE}`;
-  const binds: Bindable[] = [userId, showMinScore(env)];
+  const graphMin = showMinScore(env);
+  const binds: Bindable[] = [userId, q.item ? Math.min(graphMin, PANEL_MIN_SCORE) : graphMin];
   if (q.item) {
     where += ' AND ((s.a_type = ? AND s.a_id = ?) OR (s.b_type = ? AND s.b_id = ?))';
     binds.push(q.item.type, q.item.id, q.item.type, q.item.id);

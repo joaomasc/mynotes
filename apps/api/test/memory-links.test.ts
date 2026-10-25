@@ -192,6 +192,22 @@ describe('suggested links', () => {
     expect(await suggestionsOf(a.id)).toMatchObject({ unavailable: true });
   });
 
+  it('the note panel shows weaker pairs (explained and filtered by the AI) than the graph', async () => {
+    const t = await topic('Política');
+    const a = await note('Caso Queiroz', 'A prisão de Queiroz e a reação da família.', t.id);
+    const b = await note('Relato do caso', 'O relato sobre o caso Queiroz e as investigações.', t.id);
+    const [x, y] = [a.id, b.id].sort();
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO link_suggestions (id, user_id, a_type, a_id, b_type, b_id, score, status, direction, reason, hidden, version, created_at, updated_at)
+       VALUES (?, ?, 'note', ?, 'note', ?, 0.6, 'open', 'ab', '', 0, 1, ?, ?)`,
+    )
+      .bind(uuidv7(), userId, x, y, now, now)
+      .run();
+    expect((await suggestionsOf(a.id)).suggestions).toHaveLength(1);
+    expect((await http.get('/links/suggestions')).body.data.suggestions).toHaveLength(0);
+  });
+
   it('accepting can choose another kind and direction', async () => {
     const t = await topic('Economia');
     const a = await note('Inflação', TEXT.inflation, t.id);
